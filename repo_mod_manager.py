@@ -86,9 +86,12 @@ def list_mods(plugins_dir):
         return mods
     for entry in sorted(os.scandir(plugins_dir), key=lambda e: e.name.lower()):
         if entry.is_dir():
-            mods.append({"name": entry.name, "path": entry.path, "kind": "文件夹"})
+            # 查找文件夹内的 icon.png
+            icon_path = os.path.join(entry.path, "icon.png")
+            icon = icon_path if os.path.isfile(icon_path) else ""
+            mods.append({"name": entry.name, "path": entry.path, "kind": "文件夹", "icon": icon})
         elif entry.is_file() and entry.name.lower().endswith(".dll"):
-            mods.append({"name": entry.name, "path": entry.path, "kind": ".dll"})
+            mods.append({"name": entry.name, "path": entry.path, "kind": ".dll", "icon": ""})
     return mods
 
 
@@ -674,17 +677,19 @@ class App(tk.Tk):
         }
         for mod in self._mods:
             iid = self.local_tree.insert("", tk.END, values=(mod["name"], mod["kind"], mod["path"]))
-            # 异步加载图标
-            mod_name_lc = os.path.splitext(mod["name"])[0].lower()
-            icon_url = next(
-                (((p.get("versions") or [{}])[0].get("icon", ""))
-                 for p in _ts_all if p.get("name", "").lower() == mod_name_lc),
-                ""
-            )
-            if icon_url:
+            # 优先用文件夹内的本地 icon.png，否则查网络缓存
+            icon_src = mod.get("icon", "")
+            if not icon_src:
+                mod_name_lc = os.path.splitext(mod["name"])[0].lower()
+                icon_src = next(
+                    (((p.get("versions") or [{}])[0].get("icon", ""))
+                     for p in _ts_all if p.get("name", "").lower() == mod_name_lc),
+                    ""
+                )
+            if icon_src:
                 threading.Thread(
                     target=self._load_local_icon_worker,
-                    args=(iid, icon_url),
+                    args=(iid, icon_src),
                     daemon=True,
                 ).start()
         self._set_status(f"共找到 {len(self._mods)} 个 MOD。")
@@ -979,23 +984,27 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    def _load_local_icon_worker(self, iid: str, url: str):
+    def _load_local_icon_worker(self, iid: str, src: str):
         ICON_SIZE = 40
-        if url not in _icon_cache:
+        if src not in _icon_cache:
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
-                with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
-                    raw = resp.read()
+                if src.startswith("http"):
+                    req = urllib.request.Request(src, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+                    with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
+                        raw = resp.read()
+                else:
+                    with open(src, "rb") as f:
+                        raw = f.read()
                 import base64
                 b64 = base64.b64encode(raw).decode()
                 img = tk.PhotoImage(data=b64)
                 iw, ih = img.width(), img.height()
                 scale = max(1, max(iw, ih) // ICON_SIZE)
                 img = img.subsample(scale, scale)
-                _icon_cache[url] = img
+                _icon_cache[src] = img
             except Exception:
                 return
-        img = _icon_cache[url]
+        img = _icon_cache[src]
         def _apply():
             try:
                 self._local_img_refs[iid] = img
