@@ -110,10 +110,77 @@ def ts_search(keyword: str, page_cursor: str = ""):
         return json.loads(resp.read().decode())
 
 
-def ts_download(download_url: str) -> bytes:
+def ts_download(download_url: str, progress_cb=None) -> bytes:
     req = urllib.request.Request(download_url, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
     with urllib.request.urlopen(req, timeout=60) as resp:
-        return resp.read()
+        total = int(resp.headers.get("Content-Length", 0))
+        buf   = io.BytesIO()
+        received = 0
+        chunk = 16 * 1024
+        while True:
+            block = resp.read(chunk)
+            if not block:
+                break
+            buf.write(block)
+            received += len(block)
+            if progress_cb:
+                progress_cb(received, total)
+        return buf.getvalue()
+
+
+# ── 下载进度弹窗 ──────────────────────────────────────
+class DownloadDialog(tk.Toplevel):
+    """模态进度条弹窗，下载完成后自动关闭。"""
+    def __init__(self, parent, title="正在下载…"):
+        super().__init__(parent)
+        self.title(title)
+        self.resizable(False, False)
+        self.configure(bg=BG)
+        self.grab_set()  # 模态
+        self.protocol("WM_DELETE_WINDOW", lambda: None)  # 禁止手动关闭
+
+        w, h = 360, 110
+        px = parent.winfo_rootx() + (parent.winfo_width()  - w) // 2
+        py = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
+        self.geometry(f"{w}x{h}+{px}+{py}")
+
+        self._label = tk.Label(self, text="准备下载…", bg=BG, fg=FG,
+                               font=("Segoe UI", 9), pady=8)
+        self._label.pack()
+
+        bar_frame = tk.Frame(self, bg=BG, padx=20)
+        bar_frame.pack(fill=tk.X)
+        self._pct_var = tk.DoubleVar(value=0)
+        style = ttk.Style(self)
+        style.configure("dl.Horizontal.TProgressbar",
+                        troughcolor=PANEL, background=ACCENT, thickness=18)
+        self._bar = ttk.Progressbar(bar_frame, variable=self._pct_var,
+                                    maximum=100, length=320,
+                                    style="dl.Horizontal.TProgressbar")
+        self._bar.pack()
+
+        self._pct_label = tk.Label(self, text="0%", bg=BG, fg=DIM,
+                                   font=("Segoe UI", 9), pady=6)
+        self._pct_label.pack()
+
+    def update_progress(self, received: int, total: int):
+        if total > 0:
+            pct = received / total * 100
+            self._pct_var.set(pct)
+            self._pct_label.config(text=f"{pct:.1f}%  ({received//1024} KB / {total//1024} KB)")
+            self._bar.config(mode="determinate")
+        else:
+            self._bar.config(mode="indeterminate")
+            self._bar.step(2)
+            self._pct_label.config(text=f"{received//1024} KB 已接收")
+        self._label.config(text="正在下载…")
+        self.update_idletasks()
+
+    def set_installing(self):
+        self._label.config(text="正在解压安装…")
+        self._pct_var.set(100)
+        self._pct_label.config(text="")
+        self.update_idletasks()
 
 
 # ── 通用按钮工厂 ──────────────────────────────────────
@@ -419,21 +486,27 @@ class App(tk.Tk):
             return
         if not messagebox.askyesno("确认安装", f"确定要下载并安装以下 MOD 吗？\n\n{pkg['author']}-{name}"):
             return
+        dlg = DownloadDialog(self, title=f"安装 {name}")
         self._set_status(f"正在下载 {name}…")
         threading.Thread(
             target=self._ts_download_worker,
-            args=(name, dl_url, d),
+            args=(name, dl_url, d, dlg),
             daemon=True,
         ).start()
 
-    def _ts_download_worker(self, name: str, dl_url: str, plugins_dir: str):
+    def _ts_download_worker(self, name: str, dl_url: str, plugins_dir: str, dlg: "DownloadDialog"):
+        def on_progress(received, total):
+            self.after(0, lambda: dlg.update_progress(received, total))
         try:
-            data = ts_download(dl_url)
+            data = ts_download(dl_url, progress_cb=on_progress)
         except Exception as exc:
+            self.after(0, dlg.destroy)
             self.after(0, lambda: messagebox.showerror("下载失败", str(exc)))
             self.after(0, lambda: self._set_status("下载失败。"))
             return
+        self.after(0, dlg.set_installing)
         ok, msg = install_zip_from_bytes(data, plugins_dir)
+        self.after(0, dlg.destroy)
         if ok:
             self.after(0, lambda: self._set_status(f"✅ {name} 安装完成"))
             self.after(0, self._refresh_local)
