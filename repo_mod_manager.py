@@ -760,13 +760,13 @@ class App(tk.Tk):
                          args=(game_dir,), daemon=True).start()
 
     def _bepinex_install_worker(self, game_dir: str):
-        BEPINEX_URL = "https://thunderstore.io/c/repo/api/v1/package/BepInEx/BepInExPack/"
+        BEPINEX_URL = "https://thunderstore.io/api/experimental/package/BepInEx/BepInExPack/"
         try:
             req = urllib.request.Request(BEPINEX_URL,
                                          headers={"User-Agent": "REPO-MOD-Manager/1.0"})
             with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
                 pkg = json.loads(resp.read().decode())
-            dl_url = (pkg.get("versions") or [{}])[0].get("download_url", "")
+            dl_url = (pkg.get("latest") or {}).get("download_url", "")
             if not dl_url:
                 raise ValueError("未找到下载链接")
             data = ts_download(dl_url)
