@@ -27,8 +27,7 @@ SEARCH_ROOTS = [
     r"F:\SteamLibrary",
 ]
 
-TS_API = "https://thunderstore.io/api/experimental/package/"
-TS_COMMUNITY = "repo"
+TS_API = "https://thunderstore.io/c/repo/api/v1/package/"
 PAGE_SIZE = 50
 
 # ── 颜色主题 ──────────────────────────────────────────
@@ -98,16 +97,35 @@ def delete_mod(mod_path):
 
 
 # ── Thunderstore API ───────────────────────────────────
-def ts_search(keyword: str, page_cursor: str = ""):
-    params = {"community_identifier": TS_COMMUNITY, "page_size": PAGE_SIZE}
-    if keyword.strip():
-        params["search"] = keyword.strip()
-    if page_cursor:
-        params["cursor"] = page_cursor
-    url = TS_API + "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode())
+_ts_cache: list = []   # 全量包缓存，避免每次搜索重新拉取
+
+
+def ts_fetch_all() -> list:
+    """拉取 REPO 社区全量包列表并缓存。"""
+    global _ts_cache
+    req = urllib.request.Request(TS_API, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        _ts_cache = json.loads(resp.read().decode())
+    return _ts_cache
+
+
+def ts_search_local(keyword: str, page: int) -> dict:
+    """在本地缓存中搜索并分页，返回 {results, total, pages}。"""
+    kw = keyword.strip().lower()
+    if kw:
+        filtered = [
+            p for p in _ts_cache
+            if kw in p.get("name", "").lower()
+            or kw in p.get("owner", "").lower()
+            or kw in (p.get("versions", [{}])[0].get("description", "") if p.get("versions") else "").lower()
+        ]
+    else:
+        filtered = _ts_cache
+    total   = len(filtered)
+    pages   = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    start   = (page - 1) * PAGE_SIZE
+    results = filtered[start: start + PAGE_SIZE]
+    return {"results": results, "total": total, "pages": pages}
 
 
 def ts_download(download_url: str, progress_cb=None) -> bytes:
@@ -328,10 +346,10 @@ class App(tk.Tk):
         tk.Label(bottom, text="（将自动解压到 plugins 目录）", bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side=tk.LEFT)
 
         # 分页状态
-        self._ts_cursor_stack = []   # 历史 cursor，用于"上一页"
-        self._ts_next_cursor  = ""
         self._ts_current_page = 1
+        self._ts_total_pages  = 1
         self._ts_results      = []   # 当前页数据，含 download_url
+        self._ts_loaded       = False
 
     # ── 本地标签页逻辑 ────────────────────────────────
     def _auto_scan(self):
@@ -399,63 +417,49 @@ class App(tk.Tk):
 
     # ── 在线标签页逻辑 ────────────────────────────────
     def _ts_search_start(self):
-        self._ts_cursor_stack.clear()
-        self._ts_next_cursor  = ""
         self._ts_current_page = 1
-        self._ts_fetch(cursor="")
+        if not self._ts_loaded:
+            self._set_status("正在从 Thunderstore 拉取 REPO MOD 列表（首次需要约10秒）…")
+            threading.Thread(target=self._ts_load_all_worker, daemon=True).start()
+        else:
+            self._ts_render()
 
     def _ts_next_page(self):
-        if not self._ts_next_cursor:
+        if self._ts_current_page >= self._ts_total_pages:
             return
-        self._ts_cursor_stack.append(self._ts_next_cursor)
         self._ts_current_page += 1
-        self._ts_fetch(cursor=self._ts_next_cursor)
+        self._ts_render()
 
     def _ts_prev_page(self):
         if self._ts_current_page <= 1:
             return
-        self._ts_cursor_stack.pop()  # 当前页 cursor
-        prev = self._ts_cursor_stack[-1] if self._ts_cursor_stack else ""
         self._ts_current_page -= 1
-        self._ts_fetch(cursor=prev, push_stack=False)
+        self._ts_render()
 
-    def _ts_fetch(self, cursor: str, push_stack: bool = True):
-        self._set_status("正在从 Thunderstore 获取数据…")
-        kw = self._search_var.get()
-        threading.Thread(target=self._ts_fetch_worker, args=(kw, cursor), daemon=True).start()
-
-    def _ts_fetch_worker(self, keyword: str, cursor: str):
+    def _ts_load_all_worker(self):
         try:
-            data = ts_search(keyword, cursor)
+            ts_fetch_all()
         except Exception as exc:
-            self.after(0, lambda: self._set_status(f"请求失败: {exc}"))
+            self.after(0, lambda: self._set_status(f"拉取失败: {exc}"))
             return
-        self.after(0, lambda: self._ts_populate(data))
+        self._ts_loaded = True
+        self.after(0, self._ts_render)
 
-    def _ts_populate(self, data: dict):
+    def _ts_render(self):
+        kw   = self._search_var.get()
+        data = ts_search_local(kw, self._ts_current_page)
+        self._ts_total_pages = data["pages"]
+
         self.ts_tree.delete(*self.ts_tree.get_children())
         self._ts_results.clear()
-        self._ts_next_cursor = ""
 
-        # 解析 next cursor
-        next_url = data.get("next", "")
-        if next_url:
-            parsed = urllib.parse.urlparse(next_url)
-            qs     = urllib.parse.parse_qs(parsed.query)
-            self._ts_next_cursor = qs.get("cursor", [""])[0]
-
-        results = data.get("results", [])
-        # 只保留属于 REPO 社区的包
-        repo_results = []
-        for pkg in results:
-            listings = pkg.get("community_listings", [])
-            if any(l.get("community") == TS_COMMUNITY for l in listings):
-                repo_results.append(pkg)
-
-        for pkg in repo_results:
-            latest  = pkg.get("latest", {})
+        for pkg in data["results"]:
+            versions = pkg.get("versions", [])
+            if not versions:
+                continue
+            latest  = versions[0]
             name    = pkg.get("name", "")
-            author  = pkg.get("namespace", "")
+            author  = pkg.get("owner", "")
             version = latest.get("version_number", "")
             dl_cnt  = latest.get("downloads", 0)
             desc    = latest.get("description", "")[:80]
@@ -463,8 +467,8 @@ class App(tk.Tk):
             self._ts_results.append({"name": name, "author": author, "download_url": dl_url})
             self.ts_tree.insert("", tk.END, values=(name, author, version, dl_cnt, desc))
 
-        self._page_label.config(text=f"第 {self._ts_current_page} 页")
-        self._set_status(f"找到 {len(repo_results)} 个 REPO MOD（第 {self._ts_current_page} 页）")
+        self._page_label.config(text=f"第 {self._ts_current_page} / {self._ts_total_pages} 页")
+        self._set_status(f"共 {data['total']} 个 REPO MOD，当前第 {self._ts_current_page} 页")
 
     def _ts_install_selected(self):
         d = self.plugins_dir.get().strip()
