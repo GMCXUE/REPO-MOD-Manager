@@ -176,8 +176,18 @@ def ts_fetch_all() -> list:
     return _ts_all
 
 
-def ts_get_page(keyword: str, page: int) -> dict:
-    """在本地缓存中搜索并分页，返回 {results, page, total_pages, total}。"""
+# sort key -> (attr_getter, reverse)
+_SORT_OPTIONS = [
+    ("最后更新", "last_updated"),
+    ("最新",     "date_created"),
+    ("下载最多", "downloads"),
+    ("评分最高", "rating_score"),
+]
+_SORT_KEYS = {label: key for label, key in _SORT_OPTIONS}
+
+
+def ts_get_page(keyword: str, page: int, sort: str = "最后更新") -> dict:
+    """在本地缓存中搜索、排序并分页。"""
     kw = keyword.strip().lower()
     if kw:
         filtered = [
@@ -187,7 +197,16 @@ def ts_get_page(keyword: str, page: int) -> dict:
             or kw in (p.get("versions") or [{}])[0].get("description", "").lower()
         ]
     else:
-        filtered = _ts_all
+        filtered = list(_ts_all)
+    sort_key = _SORT_KEYS.get(sort, "last_updated")
+    if sort_key in ("downloads",):
+        filtered.sort(key=lambda p: (p.get("versions") or [{}])[0].get("downloads", 0), reverse=True)
+    elif sort_key == "rating_score":
+        filtered.sort(key=lambda p: p.get("rating_score", 0), reverse=True)
+    elif sort_key == "date_created":
+        filtered.sort(key=lambda p: p.get("date_created", ""), reverse=True)
+    else:  # last_updated
+        filtered.sort(key=lambda p: p.get("last_updated", ""), reverse=True)
     total       = len(filtered)
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     page        = max(1, min(page, total_pages))
@@ -569,6 +588,15 @@ class App(tk.Tk):
         search_entry.pack(side=tk.LEFT, padx=(6, 6))
         search_entry.bind("<Return>", lambda _: self._ts_search_start())
         make_btn(search_bar, "🔍 搜索", self._ts_search_start, ACCENT).pack(side=tk.LEFT, padx=(0, 6))
+        # 排序下拉框
+        self._sort_var = tk.StringVar(value="评分最高")
+        sort_cb = ttk.Combobox(
+            search_bar, textvariable=self._sort_var,
+            values=[label for label, _ in _SORT_OPTIONS],
+            state="readonly", width=10, font=("Segoe UI", 9),
+        )
+        sort_cb.pack(side=tk.LEFT, padx=(0, 6))
+        sort_cb.bind("<<ComboboxSelected>>", lambda _: self._ts_sort_changed())
         make_btn(search_bar, "⬅ 上一页", self._ts_prev_page, BTN_LIGHT).pack(side=tk.LEFT, padx=(0, 2))
         self._page_label = tk.Label(search_bar, text="第 1 页", bg=BG, fg=DIM, font=("Segoe UI", 9))
         self._page_label.pack(side=tk.LEFT, padx=4)
@@ -730,6 +758,11 @@ class App(tk.Tk):
     def _ts_show_detail(self, pkg):
         ModDetailDialog(self, pkg, install_cb=lambda: self._ts_do_install(pkg))
 
+    def _ts_sort_changed(self):
+        self._ts_page = 1
+        if self._ts_fetched:
+            self._ts_render_page()
+
     def _ts_search_start(self):
         self._ts_page = 1
         if not self._ts_fetched:
@@ -764,7 +797,8 @@ class App(tk.Tk):
         self._render_gen += 1          # 翻页/刷新时代次递增，令旧翻译回调失效
         gen = self._render_gen
         kw   = self._search_var.get()
-        data = ts_get_page(kw, self._ts_page)
+        sort = self._sort_var.get()
+        data = ts_get_page(kw, self._ts_page, sort)
         self._ts_page        = data["page"]
         self._ts_total_pages = data["total_pages"]
         self._ts_render(data)
@@ -988,6 +1022,37 @@ class App(tk.Tk):
         self._ts_render_page()
         self._set_status("已恢复原文")
 
+    def _collect_missing_deps(self, pkg: dict, visited: set) -> list:
+        """递归收集所有缺失的前置依赖，返回列表顺序为安装顺序。"""
+        result = []
+        for dep_str in pkg.get("dependencies", []):
+            parts = dep_str.split("-")
+            if len(parts) < 2:
+                continue
+            dep_name = parts[1].lower()
+            if dep_name in visited or dep_name in self._installed_names:
+                continue
+            visited.add(dep_name)
+            # 在 _ts_all 中查找对应包
+            dep_pkg_raw = next(
+                (p for p in _ts_all if p.get("name", "").lower() == dep_name),
+                None
+            )
+            if dep_pkg_raw is None:
+                continue
+            versions = dep_pkg_raw.get("versions") or []
+            latest   = versions[0] if versions else {}
+            dep_pkg  = {
+                "name":         dep_pkg_raw.get("name", ""),
+                "author":       dep_pkg_raw.get("owner", ""),
+                "download_url": latest.get("download_url", ""),
+                "dependencies": latest.get("dependencies", []),
+            }
+            # 先递归收集它的前置
+            result.extend(self._collect_missing_deps(dep_pkg, visited))
+            result.append(dep_pkg)
+        return result
+
     def _ts_do_install(self, pkg: dict):
         d = self.plugins_dir.get().strip()
         if not d or not os.path.isdir(d):
@@ -998,37 +1063,62 @@ class App(tk.Tk):
         if not dl_url:
             messagebox.showerror("错误", "该 MOD 无可用下载链接。")
             return
-        if not messagebox.askyesno("确认安装", f"确定要下载并安装以下 MOD 吗？\n\n{pkg['author']}-{name}"):
+        # 收集缺失前置
+        missing_deps = self._collect_missing_deps(pkg, {name.lower()})
+        if missing_deps:
+            dep_names = "\n".join(f"  • {p['author']}-{p['name']}" for p in missing_deps)
+            msg = (
+                f"确定安装以下 MOD 吗？\n\n"
+                f"{pkg['author']}-{name}\n\n"
+                f"将同时安装以下 {len(missing_deps)} 个缺失前置：\n{dep_names}"
+            )
+        else:
+            msg = f"确定要下载并安装以下 MOD 吗？\n\n{pkg['author']}-{name}"
+        if not messagebox.askyesno("确认安装", msg):
             return
+        # 按顺序：先前置再主包
+        install_queue = missing_deps + [pkg]
         dlg = DownloadDialog(self, title=f"安装 {name}")
         self._set_status(f"正在下载 {name}…")
         threading.Thread(
             target=self._ts_download_worker,
-            args=(name, dl_url, d, dlg),
+            args=(install_queue, d, dlg),
             daemon=True,
         ).start()
 
-    def _ts_download_worker(self, name: str, dl_url: str, plugins_dir: str, dlg: "DownloadDialog"):
-        def on_progress(received, total):
-            self.after(0, lambda: dlg.update_progress(received, total))
-        try:
-            data = ts_download(dl_url, progress_cb=on_progress)
-        except Exception as exc:
-            self.after(0, dlg.destroy)
-            self.after(0, lambda: messagebox.showerror("下载失败", str(exc)))
-            self.after(0, lambda: self._set_status("下载失败。"))
-            return
-        self.after(0, dlg.set_installing)
-        ok, msg = install_zip_from_bytes(data, plugins_dir)
+    def _ts_download_worker(self, install_queue: list, plugins_dir: str, dlg: "DownloadDialog"):
+        total_count = len(install_queue)
+        for idx, pkg in enumerate(install_queue):
+            name   = pkg["name"]
+            dl_url = pkg.get("download_url", "")
+            if not dl_url:
+                continue
+            self.after(0, lambda n=name, i=idx: (
+                dlg._label.config(text=f"({i+1}/{total_count}) 下载 {n}…"),
+                self._set_status(f"正在下载 {n}…"),
+            ))
+            def on_progress(received, total):
+                self.after(0, lambda: dlg.update_progress(received, total))
+            try:
+                data = ts_download(dl_url, progress_cb=on_progress)
+            except Exception as exc:
+                self.after(0, dlg.destroy)
+                self.after(0, lambda e=str(exc): messagebox.showerror("下载失败", e))
+                self.after(0, lambda: self._set_status("下载失败。"))
+                return
+            self.after(0, dlg.set_installing)
+            ok, msg = install_zip_from_bytes(data, plugins_dir)
+            if not ok:
+                self.after(0, dlg.destroy)
+                self.after(0, lambda m=msg: messagebox.showerror("安装失败", m))
+                self.after(0, lambda: self._set_status("安装失败。"))
+                return
+        main_name = install_queue[-1]["name"]
         self.after(0, dlg.destroy)
-        if ok:
-            self.after(0, lambda: self._set_status(f"✅ {name} 安装完成"))
-            self.after(0, self._refresh_local)
-            if self._ts_fetched:
-                self.after(0, self._ts_render_page)
-        else:
-            self.after(0, lambda: messagebox.showerror("安装失败", msg))
-            self.after(0, lambda: self._set_status("安装失败。"))
+        self.after(0, lambda: self._set_status(f"✅ {main_name} 安装完成（共安装 {total_count} 个包）"))
+        self.after(0, self._refresh_local)
+        if self._ts_fetched:
+            self.after(0, self._ts_render_page)
 
     def _set_status(self, text: str):
         self.status_var.set(text)
