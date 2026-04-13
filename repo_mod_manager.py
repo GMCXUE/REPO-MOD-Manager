@@ -244,7 +244,7 @@ _ts_all: list = []   # 全量包缓存
 def ts_fetch_all() -> list:
     """一次性担取并缓存全量 REPO 包。"""
     global _ts_all
-    req = urllib.request.Request(TS_API, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+    req = urllib.request.Request(TS_API, headers={"User-Agent": "REPOKit/1.0"})
     with urllib.request.urlopen(req, timeout=30, context=_SSL_CTX) as resp:
         _ts_all = json.loads(resp.read().decode())
     return _ts_all
@@ -294,7 +294,7 @@ def ts_get_page(keyword: str, page: int, sort: str = "最后更新") -> dict:
 
 
 def ts_download(download_url: str, progress_cb=None) -> bytes:
-    req = urllib.request.Request(download_url, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+    req = urllib.request.Request(download_url, headers={"User-Agent": "REPOKit/1.0"})
     with urllib.request.urlopen(req, timeout=60, context=_SSL_CTX) as resp:
         total = int(resp.headers.get("Content-Length", 0))
         buf   = io.BytesIO()
@@ -503,7 +503,7 @@ class ModDetailDialog(tk.Toplevel):
 
     def _load_icon(self, url: str):
         try:
-            req  = urllib.request.Request(url, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+            req  = urllib.request.Request(url, headers={"User-Agent": "REPOKit/1.0"})
             with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
                 raw = resp.read()
             import base64
@@ -559,7 +559,7 @@ def make_label_btn(parent, text, cmd, color, font_size=8):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("REPO MOD 管理器")
+        self.title("REPOKit — REPO MOD 管理器")
         self.geometry("900x580")
         self.minsize(720, 460)
         self.configure(bg=BG)
@@ -763,7 +763,7 @@ class App(tk.Tk):
         BEPINEX_URL = "https://thunderstore.io/api/experimental/package/BepInEx/BepInExPack/"
         try:
             req = urllib.request.Request(BEPINEX_URL,
-                                         headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+                                         headers={"User-Agent": "REPOKit/1.0"})
             with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
                 pkg = json.loads(resp.read().decode())
             dl_url = (pkg.get("latest") or {}).get("download_url", "")
@@ -1150,7 +1150,7 @@ class App(tk.Tk):
         global _icon_cache
         if url not in _icon_cache:
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "REPOKit/1.0"})
                 with urllib.request.urlopen(req, timeout=8, context=_SSL_CTX) as resp:
                     raw = resp.read()
                 b64 = base64.b64encode(raw).decode()
@@ -1177,7 +1177,7 @@ class App(tk.Tk):
         if src not in _icon_cache:
             try:
                 if src.startswith("http"):
-                    req = urllib.request.Request(src, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+                    req = urllib.request.Request(src, headers={"User-Agent": "REPOKit/1.0"})
                     with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
                         raw = resp.read()
                 else:
@@ -1201,7 +1201,7 @@ class App(tk.Tk):
         if src not in _icon_cache:
             try:
                 if src.startswith("http"):
-                    req = urllib.request.Request(src, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+                    req = urllib.request.Request(src, headers={"User-Agent": "REPOKit/1.0"})
                     with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
                         raw = resp.read()
                 else:
