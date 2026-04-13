@@ -556,26 +556,27 @@ class App(tk.Tk):
         btn_bar = tk.Frame(parent, bg=BG, pady=4)
         btn_bar.pack(fill=tk.X)
         make_btn(btn_bar, "📦 导入 ZIP 安装", self._install_local_zip, GREEN).pack(side=tk.LEFT, padx=(0, 8))
-        make_btn(btn_bar, "🗑 删除选中 MOD",  self._delete_mod,        RED   ).pack(side=tk.LEFT, padx=(0, 8))
-        make_btn(btn_bar, "🔄 刷新列表",       self._refresh_local,     ACCENT).pack(side=tk.LEFT)
+        make_btn(btn_bar, " 刷新列表",       self._refresh_local,     ACCENT).pack(side=tk.LEFT)
 
-        frame = tk.Frame(parent, bg=BG)
-        frame.pack(fill=tk.BOTH, expand=True)
-
-        cols = ("name", "kind", "path")
-        self.local_tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
-        self.local_tree.heading("name", text="MOD 名称")
-        self.local_tree.heading("kind", text="类型")
-        self.local_tree.heading("path", text="路径")
-        self.local_tree.column("name", width=240, minwidth=120)
-        self.local_tree.column("kind", width=70,  minwidth=60, anchor=tk.CENTER)
-        self.local_tree.column("path", width=500, minwidth=200)
-        self._local_img_refs: dict = {}  # iid -> PhotoImage
-
-        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.local_tree.yview)
-        self.local_tree.configure(yscrollcommand=vsb.set)
-        self.local_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # 卡片滚动区
+        grid_outer = tk.Frame(parent, bg=BG)
+        grid_outer.pack(fill=tk.BOTH, expand=True)
+        self._local_canvas = tk.Canvas(grid_outer, bg=BG, highlightthickness=0)
+        vsb = ttk.Scrollbar(grid_outer, orient=tk.VERTICAL, command=self._local_canvas.yview)
+        self._local_canvas.configure(yscrollcommand=vsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._local_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._local_card_frame = tk.Frame(self._local_canvas, bg=BG)
+        self._local_canvas_win = self._local_canvas.create_window((0, 0), window=self._local_card_frame, anchor="nw")
+        self._local_card_frame.bind("<Configure>", lambda e: self._local_canvas.configure(
+            scrollregion=self._local_canvas.bbox("all")))
+        self._local_canvas.bind("<Configure>", lambda e: self._local_canvas.itemconfig(
+            self._local_canvas_win, width=e.width))
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self._local_canvas.bind(seq, self._on_mousewheel)
+            self._local_card_frame.bind(seq, self._on_mousewheel)
+        self._local_img_refs: dict = {}  # path -> PhotoImage
+        self._local_selected: dict = {}  # 当前选中的 mod {name, kind, path}
 
     # ── 标签页 2：在线 Thunderstore ───────────────────
     def _build_online_tab(self, parent):
@@ -665,8 +666,10 @@ class App(tk.Tk):
             self._refresh_local()
 
     def _refresh_local(self):
-        self.local_tree.delete(*self.local_tree.get_children())
+        for w in self._local_card_frame.winfo_children():
+            w.destroy()
         self._local_img_refs.clear()
+        self._local_selected = {}
         d = self.plugins_dir.get().strip()
         if not d or not os.path.isdir(d):
             self._set_status("plugins 目录无效，请重新选择。")
@@ -675,12 +678,53 @@ class App(tk.Tk):
         self._installed_names = {
             os.path.splitext(m["name"])[0].lower() for m in self._mods
         }
-        for mod in self._mods:
-            iid = self.local_tree.insert("", tk.END, values=(mod["name"], mod["kind"], mod["path"]))
-            # 优先用文件夹内的本地 icon.png，否则查网络缓存
+        COLS = 4
+        LOCAL_CARD_W = 200
+        LOCAL_IMG_H  = 100
+        for idx, mod in enumerate(self._mods):
+            name = mod["name"]
+            kind = mod["kind"]
+            path = mod["path"]
+            row, col = divmod(idx, COLS)
+
+            card = tk.Frame(self._local_card_frame, bg=PANEL, bd=0,
+                            highlightthickness=1, highlightbackground="#d0dce8",
+                            width=LOCAL_CARD_W, cursor="hand2")
+            card.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+            self._local_card_frame.grid_columnconfigure(col, weight=1)
+
+            # 图片区
+            img_frame = tk.Frame(card, bg="#c8d8e8", height=LOCAL_IMG_H, width=LOCAL_CARD_W)
+            img_frame.pack(fill=tk.X)
+            img_frame.pack_propagate(False)
+            img_lbl = tk.Label(img_frame, bg="#c8d8e8", text="", cursor="hand2")
+            img_lbl.place(relx=0.5, rely=0.5, anchor="center")
+
+            # 文字区
+            info = tk.Frame(card, bg=PANEL, padx=8, pady=6)
+            info.pack(fill=tk.BOTH, expand=True)
+            tk.Label(info, text=name, bg=PANEL, fg=FG,
+                     font=("Segoe UI", 9, "bold"),
+                     anchor=tk.W, wraplength=LOCAL_CARD_W - 16, justify=tk.LEFT
+                     ).pack(fill=tk.X)
+            tk.Label(info, text=kind, bg=PANEL, fg=DIM,
+                     font=("Segoe UI", 8), anchor=tk.W).pack(fill=tk.X)
+
+            btn_row = tk.Frame(info, bg=PANEL)
+            btn_row.pack(fill=tk.X, pady=(6, 2))
+            make_label_btn(btn_row, "🗑 删除",
+                           lambda p=path, n=name: self._delete_mod_card(n, p),
+                           RED).pack(side=tk.LEFT)
+
+            # 绑定滚轮
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                for w in (card, img_frame, img_lbl, info, btn_row):
+                    w.bind(seq, self._on_mousewheel)
+
+            # 异步加载图标
             icon_src = mod.get("icon", "")
             if not icon_src:
-                mod_name_lc = os.path.splitext(mod["name"])[0].lower()
+                mod_name_lc = os.path.splitext(name)[0].lower()
                 icon_src = next(
                     (((p.get("versions") or [{}])[0].get("icon", ""))
                      for p in _ts_all if p.get("name", "").lower() == mod_name_lc),
@@ -688,8 +732,8 @@ class App(tk.Tk):
                 )
             if icon_src:
                 threading.Thread(
-                    target=self._load_local_icon_worker,
-                    args=(iid, icon_src),
+                    target=self._load_local_icon_card_worker,
+                    args=(path, icon_src, img_lbl, img_frame, LOCAL_IMG_H),
                     daemon=True,
                 ).start()
         self._set_status(f"共找到 {len(self._mods)} 个 MOD。")
@@ -712,15 +756,10 @@ class App(tk.Tk):
         else:
             messagebox.showerror("安装失败", msg)
 
-    def _delete_mod(self):
-        sel = self.local_tree.selection()
-        if not sel:
-            messagebox.showinfo("提示", "请先在列表中选中一个 MOD。")
-            return
-        name, kind, path = self.local_tree.item(sel[0])["values"]
+    def _delete_mod_card(self, name: str, path: str):
         if not messagebox.askyesno(
             "确认删除",
-            f"确定要删除以下 MOD 吗？\n\n名称：{name}\n类型：{kind}\n路径：{path}\n\n此操作不可恢复！",
+            f"确定要删除以下 MOD 吗？\n\n名称：{name}\n路径：{path}\n\n此操作不可恢复！",
         ):
             return
         ok, msg = delete_mod(path)
@@ -983,6 +1022,30 @@ class App(tk.Tk):
             frame.config(bg=PANEL)
         except Exception:
             pass
+
+    def _load_local_icon_card_worker(self, path: str, src: str, lbl, frame, img_h: int):
+        IMG_W = 200
+        if src not in _icon_cache:
+            try:
+                if src.startswith("http"):
+                    req = urllib.request.Request(src, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+                    with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
+                        raw = resp.read()
+                else:
+                    with open(src, "rb") as f:
+                        raw = f.read()
+                import base64
+                b64 = base64.b64encode(raw).decode()
+                img = tk.PhotoImage(data=b64)
+                iw, ih = img.width(), img.height()
+                scale = max(1, max(iw // IMG_W, ih // img_h))
+                img = img.subsample(scale, scale)
+                _icon_cache[src] = img
+            except Exception:
+                return
+        img = _icon_cache[src]
+        self._local_img_refs[path] = img
+        self.after(0, lambda: self._set_card_image(lbl, frame, img))
 
     def _load_local_icon_worker(self, iid: str, src: str):
         ICON_SIZE = 40
