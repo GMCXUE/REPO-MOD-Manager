@@ -95,22 +95,61 @@ def list_mods(plugins_dir):
     return mods
 
 
+def _extract_zip(zf: zipfile.ZipFile, plugins_dir: str, pkg_name: str = ""):
+    """
+    从 ZipFile 对象中提取内容到 plugins_dir。
+    优先级：
+    1. 若 ZIP 内含 BepInEx/plugins/ 路径，只提取该路径下的文件到 plugins_dir。
+    2. 否则，将所有内容提取到 plugins_dir/<pkg_name>/ 子目录（用包名创建文件夹）。
+    """
+    names = zf.namelist()
+    prefix = ""
+    for n in names:
+        if "bepinex/plugins/" in n.lower():
+            # 找到标准路径的前缀（大小写不敏感）
+            idx = n.lower().index("bepinex/plugins/")
+            prefix = n[:idx + len("bepinex/plugins/")]
+            break
+
+    if prefix:
+        # 只提取 BepInEx/plugins/ 下的内容
+        for member in names:
+            if not member.startswith(prefix):
+                continue
+            rel = member[len(prefix):]
+            if not rel or rel.endswith("/"):
+                continue
+            dest = os.path.join(plugins_dir, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with zf.open(member) as src, open(dest, "wb") as dst:
+                dst.write(src.read())
+    else:
+        # 无标准路径结构，用包名创建文件夹包装
+        if pkg_name:
+            target = os.path.join(plugins_dir, pkg_name)
+        else:
+            target = plugins_dir
+        os.makedirs(target, exist_ok=True)
+        zf.extractall(target)
+
+
 def install_zip_from_path(zip_path, plugins_dir):
     if not zipfile.is_zipfile(zip_path):
         return False, "所选文件不是有效的 ZIP 压缩包。"
     try:
+        pkg_name = os.path.splitext(os.path.basename(zip_path))[0]
         with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(plugins_dir)
+            _extract_zip(zf, plugins_dir, pkg_name)
         return True, f"已成功解压到:\n{plugins_dir}"
     except Exception as exc:
         return False, f"解压失败: {exc}"
 
 
-def install_zip_from_bytes(data: bytes, plugins_dir: str):
+def install_zip_from_bytes(data: bytes, plugins_dir: str, pkg_name: str = ""):
     try:
         buf = io.BytesIO(data)
         with zipfile.ZipFile(buf, "r") as zf:
-            zf.extractall(plugins_dir)
+            _extract_zip(zf, plugins_dir, pkg_name)
         return True, f"已成功安装到:\n{plugins_dir}"
     except Exception as exc:
         return False, f"解压失败: {exc}"
@@ -562,10 +601,7 @@ class App(tk.Tk):
         grid_outer = tk.Frame(parent, bg=BG)
         grid_outer.pack(fill=tk.BOTH, expand=True)
         self._local_canvas = tk.Canvas(grid_outer, bg=BG, highlightthickness=0)
-        vsb = ttk.Scrollbar(grid_outer, orient=tk.VERTICAL, command=self._local_canvas.yview)
-        self._local_canvas.configure(yscrollcommand=vsb.set)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        self._local_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._local_canvas.pack(fill=tk.BOTH, expand=True)
         self._local_card_frame = tk.Frame(self._local_canvas, bg=BG)
         self._local_canvas_win = self._local_canvas.create_window((0, 0), window=self._local_card_frame, anchor="nw")
         self._local_card_frame.bind("<Configure>", lambda e: self._local_canvas.configure(
@@ -613,10 +649,7 @@ class App(tk.Tk):
         grid_outer = tk.Frame(parent, bg=BG)
         grid_outer.pack(fill=tk.BOTH, expand=True)
         self._card_canvas = tk.Canvas(grid_outer, bg=BG, highlightthickness=0)
-        vsb = ttk.Scrollbar(grid_outer, orient=tk.VERTICAL, command=self._card_canvas.yview)
-        self._card_canvas.configure(yscrollcommand=vsb.set)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        self._card_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._card_canvas.pack(fill=tk.BOTH, expand=True)
         self._card_frame = tk.Frame(self._card_canvas, bg=BG)
         self._card_canvas_win = self._card_canvas.create_window((0, 0), window=self._card_frame, anchor="nw")
         self._card_frame.bind("<Configure>", self._on_card_frame_configure)
@@ -1218,7 +1251,8 @@ class App(tk.Tk):
                 self.after(0, lambda: self._set_status("下载失败。"))
                 return
             self.after(0, dlg.set_installing)
-            ok, msg = install_zip_from_bytes(data, plugins_dir)
+            pkg_name = f"{pkg.get('author', '')}-{name}"
+            ok, msg = install_zip_from_bytes(data, plugins_dir, pkg_name)
             if not ok:
                 self.after(0, dlg.destroy)
                 self.after(0, lambda m=msg: messagebox.showerror("安装失败", m))
