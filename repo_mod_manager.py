@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
+import sys
 import zipfile
 import shutil
 import threading
@@ -14,6 +15,29 @@ import ssl
 _SSL_CTX = ssl.create_default_context()
 _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode = ssl.CERT_NONE
+
+
+# ── 配置文件（与 exe / 脚本同目录）──────────────────────
+def _app_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(_app_dir(), "config.json")
+
+def load_config() -> dict:
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_config(data: dict):
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 # ── 常量 ──────────────────────────────────────────────
@@ -450,12 +474,18 @@ class App(tk.Tk):
         self.configure(bg=BG)
         self.resizable(True, True)
 
-        self.plugins_dir = tk.StringVar(value="正在扫描…")
+        cfg = load_config()
+        self.plugins_dir = tk.StringVar(value=cfg.get("plugins_dir", "正在扫描…"))
         self.status_var   = tk.StringVar(value="就绪")
         self._mods        = []
 
         self._build_ui()
-        threading.Thread(target=self._auto_scan, daemon=True).start()
+        # 若配置中已有路径则跳过自动扫描，否则后台扫描
+        if cfg.get("plugins_dir"):
+            self._set_status(f"已从配置加载路径: {cfg['plugins_dir']}")
+            threading.Thread(target=self._refresh_local, daemon=True).start()
+        else:
+            threading.Thread(target=self._auto_scan, daemon=True).start()
 
     # ── UI 总装 ───────────────────────────────────────
     def _build_ui(self):
@@ -578,15 +608,17 @@ class App(tk.Tk):
         self._ts_page        = 1
         self._ts_total_pages = 1
         self._ts_fetched     = False
-        self._ts_translated  = False   # 当前是否处于翻译模式
+        self._ts_translated  = False
         self._ts_results     = []
         self._card_img_refs: list = []
+        self._installed_names: set = set()  # 本地已安装包名集合（小写）
 
     # ── 本地标签页逻辑 ────────────────────────────────
     def _auto_scan(self):
         found = find_plugins_dir()
         if found:
             self.plugins_dir.set(found)
+            save_config({"plugins_dir": found})
             self._set_status(f"已自动定位: {found}")
         else:
             self.plugins_dir.set("")
@@ -596,7 +628,9 @@ class App(tk.Tk):
     def _browse_dir(self):
         d = filedialog.askdirectory(title="选择 BepInEx/plugins 目录")
         if d:
-            self.plugins_dir.set(d.replace("/", "\\"))
+            path = d.replace("/", "\\")
+            self.plugins_dir.set(path)
+            save_config({"plugins_dir": path})
             self._refresh_local()
 
     def _refresh_local(self):
@@ -606,6 +640,10 @@ class App(tk.Tk):
             self._set_status("plugins 目录无效，请重新选择。")
             return
         self._mods = list_mods(d)
+        # 更新已安装名称集合（去掉 .dll 后缀，转小写）
+        self._installed_names = {
+            os.path.splitext(m["name"])[0].lower() for m in self._mods
+        }
         for mod in self._mods:
             self.local_tree.insert("", tk.END, values=(mod["name"], mod["kind"], mod["path"]))
         self._set_status(f"共找到 {len(self._mods)} 个 MOD。")
@@ -802,6 +840,13 @@ class App(tk.Tk):
             img_frame.pack_propagate(False)
             img_lbl = tk.Label(img_frame, bg="#c8d8e8", text="", cursor="hand2")
             img_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            # 已安装徽标
+            if name.lower() in self._installed_names or \
+               f"{author.lower()}-{name.lower()}" in self._installed_names:
+                tk.Label(img_frame, text="✓ 已安装",
+                         bg=GREEN, fg="#ffffff",
+                         font=("Segoe UI", 8, "bold"), padx=6, pady=2,
+                         ).place(relx=1.0, rely=0.0, anchor="ne")
 
             # 文字区
             info = tk.Frame(card, bg=PANEL, padx=8, pady=6)
@@ -974,6 +1019,8 @@ class App(tk.Tk):
         if ok:
             self.after(0, lambda: self._set_status(f"✅ {name} 安装完成"))
             self.after(0, self._refresh_local)
+            if self._ts_fetched:
+                self.after(0, self._ts_render_page)
         else:
             self.after(0, lambda: messagebox.showerror("安装失败", msg))
             self.after(0, lambda: self._set_status("安装失败。"))
