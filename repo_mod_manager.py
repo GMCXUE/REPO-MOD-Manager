@@ -32,14 +32,14 @@ TS_COMMUNITY = "repo"
 PAGE_SIZE = 50
 
 # ── 颜色主题 ──────────────────────────────────────────
-BG     = "#1e1e2e"
-PANEL  = "#2a2a3e"
-ACCENT = "#7c5cbf"
-GREEN  = "#4c8a5c"
-RED    = "#a3404a"
-FG     = "#cdd6f4"
-DIM    = "#6c7086"
-BAR    = "#11111b"
+BG     = "#f0f4fa"
+PANEL  = "#ffffff"
+ACCENT = "#1a6ed8"
+GREEN  = "#1a8a4a"
+RED    = "#c0392b"
+FG     = "#1a2a3a"
+DIM    = "#5a7a9a"
+BAR    = "#dce8f5"
 
 
 # ── 本地核心逻辑 ──────────────────────────────────────
