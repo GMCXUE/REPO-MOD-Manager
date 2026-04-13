@@ -4,6 +4,11 @@ import os
 import zipfile
 import shutil
 import threading
+import urllib.request
+import urllib.parse
+import json
+import io
+import tempfile
 
 
 # ── 常量 ──────────────────────────────────────────────
@@ -22,10 +27,23 @@ SEARCH_ROOTS = [
     r"F:\SteamLibrary",
 ]
 
+TS_API = "https://thunderstore.io/api/experimental/package/"
+TS_COMMUNITY = "repo"
+PAGE_SIZE = 50
 
-# ── 核心逻辑 ──────────────────────────────────────────
+# ── 颜色主题 ──────────────────────────────────────────
+BG     = "#1e1e2e"
+PANEL  = "#2a2a3e"
+ACCENT = "#7c5cbf"
+GREEN  = "#4c8a5c"
+RED    = "#a3404a"
+FG     = "#cdd6f4"
+DIM    = "#6c7086"
+BAR    = "#11111b"
+
+
+# ── 本地核心逻辑 ──────────────────────────────────────
 def find_plugins_dir():
-    """扫描常见 Steam 目录，返回 plugins 文件夹路径；未找到返回 None。"""
     for root in SEARCH_ROOTS:
         candidate = os.path.join(root, STEAM_SUB)
         if os.path.isdir(candidate):
@@ -34,10 +52,6 @@ def find_plugins_dir():
 
 
 def list_mods(plugins_dir):
-    """
-    列出 plugins 目录下所有子文件夹和顶层 .dll 文件。
-    返回 list[dict]，每项含 name / path / kind。
-    """
     mods = []
     if not plugins_dir or not os.path.isdir(plugins_dir):
         return mods
@@ -49,11 +63,7 @@ def list_mods(plugins_dir):
     return mods
 
 
-def install_zip(zip_path, plugins_dir):
-    """
-    将 ZIP 压缩包解压到 plugins_dir。
-    返回 (success: bool, message: str)。
-    """
+def install_zip_from_path(zip_path, plugins_dir):
     if not zipfile.is_zipfile(zip_path):
         return False, "所选文件不是有效的 ZIP 压缩包。"
     try:
@@ -64,11 +74,17 @@ def install_zip(zip_path, plugins_dir):
         return False, f"解压失败: {exc}"
 
 
+def install_zip_from_bytes(data: bytes, plugins_dir: str):
+    try:
+        buf = io.BytesIO(data)
+        with zipfile.ZipFile(buf, "r") as zf:
+            zf.extractall(plugins_dir)
+        return True, f"已成功安装到:\n{plugins_dir}"
+    except Exception as exc:
+        return False, f"解压失败: {exc}"
+
+
 def delete_mod(mod_path):
-    """
-    安全删除单个 MOD（文件夹或 .dll 文件）。
-    返回 (success: bool, message: str)。
-    """
     try:
         if os.path.isdir(mod_path):
             shutil.rmtree(mod_path)
@@ -81,119 +97,176 @@ def delete_mod(mod_path):
         return False, f"删除失败: {exc}"
 
 
-# ── 界面 ──────────────────────────────────────────────
+# ── Thunderstore API ───────────────────────────────────
+def ts_search(keyword: str, page_cursor: str = ""):
+    params = {"community_identifier": TS_COMMUNITY, "page_size": PAGE_SIZE}
+    if keyword.strip():
+        params["search"] = keyword.strip()
+    if page_cursor:
+        params["cursor"] = page_cursor
+    url = TS_API + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode())
+
+
+def ts_download(download_url: str) -> bytes:
+    req = urllib.request.Request(download_url, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return resp.read()
+
+
+# ── 通用按钮工厂 ──────────────────────────────────────
+def make_btn(parent, text, cmd, color):
+    return tk.Button(
+        parent, text=text, command=cmd,
+        bg=color, fg="#ffffff",
+        activebackground=color, activeforeground="#ffffff",
+        relief=tk.FLAT, font=("Segoe UI", 9, "bold"),
+        padx=10, pady=5, cursor="hand2", bd=0,
+    )
+
+
+# ── 主窗口 ────────────────────────────────────────────
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("REPO MOD 管理器")
-        self.geometry("780x520")
-        self.minsize(640, 420)
-        self.configure(bg="#1e1e2e")
+        self.geometry("900x580")
+        self.minsize(720, 460)
+        self.configure(bg=BG)
         self.resizable(True, True)
 
         self.plugins_dir = tk.StringVar(value="正在扫描…")
-        self._mods = []
+        self.status_var   = tk.StringVar(value="就绪")
+        self._mods        = []
 
         self._build_ui()
-        # 扫描放在后台线程，避免启动时卡顿
         threading.Thread(target=self._auto_scan, daemon=True).start()
 
-    # ── UI 构建 ────────────────────────────────────────
+    # ── UI 总装 ───────────────────────────────────────
     def _build_ui(self):
-        BG = "#1e1e2e"
-        PANEL = "#2a2a3e"
-        ACCENT = "#7c5cbf"
-        FG = "#cdd6f4"
-        DIM = "#6c7086"
-
-        # 顶部路径栏
+        # 顶部路径栏（共享）
         top = tk.Frame(self, bg=BG, pady=6)
         top.pack(fill=tk.X, padx=12)
-
         tk.Label(top, text="plugins 目录:", bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side=tk.LEFT)
         tk.Entry(
-            top,
-            textvariable=self.plugins_dir,
-            bg=PANEL,
-            fg=FG,
-            insertbackground=FG,
-            relief=tk.FLAT,
-            font=("Segoe UI", 9),
-            bd=4,
+            top, textvariable=self.plugins_dir,
+            bg=PANEL, fg=FG, insertbackground=FG,
+            relief=tk.FLAT, font=("Segoe UI", 9), bd=4,
         ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
-        self._btn(top, "浏览…", self._browse_dir, ACCENT).pack(side=tk.LEFT)
+        make_btn(top, "浏览…", self._browse_dir, ACCENT).pack(side=tk.LEFT)
 
-        # 操作按钮栏
-        btn_bar = tk.Frame(self, bg=BG, pady=4)
-        btn_bar.pack(fill=tk.X, padx=12)
-        self._btn(btn_bar, "📦 导入 ZIP 安装 MOD", self._install_mod, "#4c8a5c").pack(side=tk.LEFT, padx=(0, 8))
-        self._btn(btn_bar, "🗑 删除选中 MOD", self._delete_mod, "#a3404a").pack(side=tk.LEFT, padx=(0, 8))
-        self._btn(btn_bar, "🔄 刷新列表", self._refresh, ACCENT).pack(side=tk.LEFT)
-
-        # MOD 列表
-        frame = tk.Frame(self, bg=BG)
-        frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(4, 0))
-
+        # Notebook
         style = ttk.Style(self)
         style.theme_use("clam")
-        style.configure(
-            "Treeview",
-            background=PANEL,
-            foreground=FG,
-            fieldbackground=PANEL,
-            rowheight=26,
-            font=("Segoe UI", 10),
-        )
-        style.configure("Treeview.Heading", background=ACCENT, foreground="#ffffff", font=("Segoe UI", 9, "bold"))
+        style.configure("Treeview", background=PANEL, foreground=FG,
+                        fieldbackground=PANEL, rowheight=26, font=("Segoe UI", 10))
+        style.configure("Treeview.Heading", background=ACCENT,
+                        foreground="#ffffff", font=("Segoe UI", 9, "bold"))
         style.map("Treeview", background=[("selected", ACCENT)])
+        style.configure("TNotebook", background=BG, borderwidth=0)
+        style.configure("TNotebook.Tab", background=PANEL, foreground=FG,
+                        padding=[12, 5], font=("Segoe UI", 9, "bold"))
+        style.map("TNotebook.Tab", background=[("selected", ACCENT)],
+                  foreground=[("selected", "#ffffff")])
 
-        cols = ("name", "kind", "path")
-        self.tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
-        self.tree.heading("name", text="MOD 名称")
-        self.tree.heading("kind", text="类型")
-        self.tree.heading("path", text="路径")
-        self.tree.column("name", width=220, minwidth=120)
-        self.tree.column("kind", width=70, minwidth=60, anchor=tk.CENTER)
-        self.tree.column("path", width=440, minwidth=200)
+        nb = ttk.Notebook(self)
+        nb.pack(fill=tk.BOTH, expand=True, padx=12, pady=(4, 0))
 
-        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        tab_local  = tk.Frame(nb, bg=BG)
+        tab_online = tk.Frame(nb, bg=BG)
+        nb.add(tab_local,  text="  📂 已安装 MOD  ")
+        nb.add(tab_online, text="  🌐 在线浏览安装  ")
+
+        self._build_local_tab(tab_local)
+        self._build_online_tab(tab_online)
 
         # 底部状态栏
-        self.status_var = tk.StringVar(value="就绪")
-        status_bar = tk.Label(
-            self,
-            textvariable=self.status_var,
-            bg="#11111b",
-            fg=DIM,
-            anchor=tk.W,
-            font=("Segoe UI", 9),
-            padx=8,
-            pady=4,
-        )
-        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        tk.Label(self, textvariable=self.status_var, bg=BAR, fg=DIM,
+                 anchor=tk.W, font=("Segoe UI", 9), padx=8, pady=4
+                 ).pack(fill=tk.X, side=tk.BOTTOM)
 
-    @staticmethod
-    def _btn(parent, text, cmd, color):
-        return tk.Button(
-            parent,
-            text=text,
-            command=cmd,
-            bg=color,
-            fg="#ffffff",
-            activebackground=color,
-            activeforeground="#ffffff",
-            relief=tk.FLAT,
-            font=("Segoe UI", 9, "bold"),
-            padx=10,
-            pady=5,
-            cursor="hand2",
-            bd=0,
-        )
+    # ── 标签页 1：本地已安装 ──────────────────────────
+    def _build_local_tab(self, parent):
+        btn_bar = tk.Frame(parent, bg=BG, pady=4)
+        btn_bar.pack(fill=tk.X)
+        make_btn(btn_bar, "📦 导入 ZIP 安装", self._install_local_zip, GREEN).pack(side=tk.LEFT, padx=(0, 8))
+        make_btn(btn_bar, "🗑 删除选中 MOD",  self._delete_mod,        RED   ).pack(side=tk.LEFT, padx=(0, 8))
+        make_btn(btn_bar, "🔄 刷新列表",       self._refresh_local,     ACCENT).pack(side=tk.LEFT)
 
-    # ── 逻辑方法 ───────────────────────────────────────
+        frame = tk.Frame(parent, bg=BG)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        cols = ("name", "kind", "path")
+        self.local_tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
+        self.local_tree.heading("name", text="MOD 名称")
+        self.local_tree.heading("kind", text="类型")
+        self.local_tree.heading("path", text="路径")
+        self.local_tree.column("name", width=220, minwidth=120)
+        self.local_tree.column("kind", width=70,  minwidth=60, anchor=tk.CENTER)
+        self.local_tree.column("path", width=500, minwidth=200)
+
+        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.local_tree.yview)
+        self.local_tree.configure(yscrollcommand=vsb.set)
+        self.local_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    # ── 标签页 2：在线 Thunderstore ───────────────────
+    def _build_online_tab(self, parent):
+        # 搜索栏
+        search_bar = tk.Frame(parent, bg=BG, pady=4)
+        search_bar.pack(fill=tk.X)
+        tk.Label(search_bar, text="搜索:", bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self._search_var = tk.StringVar()
+        search_entry = tk.Entry(
+            search_bar, textvariable=self._search_var,
+            bg=PANEL, fg=FG, insertbackground=FG,
+            relief=tk.FLAT, font=("Segoe UI", 10), bd=4, width=30,
+        )
+        search_entry.pack(side=tk.LEFT, padx=(6, 6))
+        search_entry.bind("<Return>", lambda _: self._ts_search_start())
+        make_btn(search_bar, "🔍 搜索", self._ts_search_start, ACCENT).pack(side=tk.LEFT, padx=(0, 8))
+        make_btn(search_bar, "⬅ 上一页", self._ts_prev_page, PANEL).pack(side=tk.LEFT, padx=(0, 4))
+        self._page_label = tk.Label(search_bar, text="第 1 页", bg=BG, fg=DIM, font=("Segoe UI", 9))
+        self._page_label.pack(side=tk.LEFT, padx=4)
+        make_btn(search_bar, "下一页 ➡", self._ts_next_page, PANEL).pack(side=tk.LEFT, padx=(4, 0))
+
+        # MOD 列表
+        list_frame = tk.Frame(parent, bg=BG)
+        list_frame.pack(fill=tk.BOTH, expand=True)
+
+        ts_cols = ("name", "author", "version", "downloads", "desc")
+        self.ts_tree = ttk.Treeview(list_frame, columns=ts_cols, show="headings", selectmode="browse")
+        self.ts_tree.heading("name",      text="MOD 名称")
+        self.ts_tree.heading("author",    text="作者")
+        self.ts_tree.heading("version",   text="版本")
+        self.ts_tree.heading("downloads", text="下载量")
+        self.ts_tree.heading("desc",      text="简介")
+        self.ts_tree.column("name",      width=180, minwidth=100)
+        self.ts_tree.column("author",    width=110, minwidth=80)
+        self.ts_tree.column("version",   width=70,  minwidth=60, anchor=tk.CENTER)
+        self.ts_tree.column("downloads", width=80,  minwidth=60, anchor=tk.CENTER)
+        self.ts_tree.column("desc",      width=380, minwidth=150)
+
+        vsb2 = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.ts_tree.yview)
+        self.ts_tree.configure(yscrollcommand=vsb2.set)
+        self.ts_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb2.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # 安装按钮
+        bottom = tk.Frame(parent, bg=BG, pady=6)
+        bottom.pack(fill=tk.X)
+        make_btn(bottom, "⬇ 下载并安装选中 MOD", self._ts_install_selected, GREEN).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(bottom, text="（将自动解压到 plugins 目录）", bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side=tk.LEFT)
+
+        # 分页状态
+        self._ts_cursor_stack = []   # 历史 cursor，用于"上一页"
+        self._ts_next_cursor  = ""
+        self._ts_current_page = 1
+        self._ts_results      = []   # 当前页数据，含 download_url
+
+    # ── 本地标签页逻辑 ────────────────────────────────
     def _auto_scan(self):
         found = find_plugins_dir()
         if found:
@@ -202,27 +275,26 @@ class App(tk.Tk):
         else:
             self.plugins_dir.set("")
             self._set_status("未自动找到 plugins 目录，请手动浏览选择。")
-        self._refresh()
+        self._refresh_local()
 
     def _browse_dir(self):
         d = filedialog.askdirectory(title="选择 BepInEx/plugins 目录")
         if d:
             self.plugins_dir.set(d.replace("/", "\\"))
-            self._refresh()
+            self._refresh_local()
 
-    def _refresh(self):
-        self.tree.delete(*self.tree.get_children())
+    def _refresh_local(self):
+        self.local_tree.delete(*self.local_tree.get_children())
         d = self.plugins_dir.get().strip()
         if not d or not os.path.isdir(d):
             self._set_status("plugins 目录无效，请重新选择。")
             return
         self._mods = list_mods(d)
         for mod in self._mods:
-            self.tree.insert("", tk.END, values=(mod["name"], mod["kind"], mod["path"]))
-        count = len(self._mods)
-        self._set_status(f"共找到 {count} 个 MOD。")
+            self.local_tree.insert("", tk.END, values=(mod["name"], mod["kind"], mod["path"]))
+        self._set_status(f"共找到 {len(self._mods)} 个 MOD。")
 
-    def _install_mod(self):
+    def _install_local_zip(self):
         d = self.plugins_dir.get().strip()
         if not d or not os.path.isdir(d):
             messagebox.showwarning("警告", "请先设置有效的 plugins 目录。")
@@ -233,20 +305,19 @@ class App(tk.Tk):
         )
         if not zip_path:
             return
-        ok, msg = install_zip(zip_path, d)
+        ok, msg = install_zip_from_path(zip_path, d)
         if ok:
             messagebox.showinfo("安装成功", msg)
-            self._refresh()
+            self._refresh_local()
         else:
             messagebox.showerror("安装失败", msg)
 
     def _delete_mod(self):
-        sel = self.tree.selection()
+        sel = self.local_tree.selection()
         if not sel:
             messagebox.showinfo("提示", "请先在列表中选中一个 MOD。")
             return
-        item = self.tree.item(sel[0])
-        name, kind, path = item["values"]
+        name, kind, path = self.local_tree.item(sel[0])["values"]
         if not messagebox.askyesno(
             "确认删除",
             f"确定要删除以下 MOD 吗？\n\n名称：{name}\n类型：{kind}\n路径：{path}\n\n此操作不可恢复！",
@@ -255,11 +326,122 @@ class App(tk.Tk):
         ok, msg = delete_mod(path)
         if ok:
             self._set_status(f"已删除: {name}")
-            self._refresh()
+            self._refresh_local()
         else:
             messagebox.showerror("删除失败", msg)
 
-    def _set_status(self, text):
+    # ── 在线标签页逻辑 ────────────────────────────────
+    def _ts_search_start(self):
+        self._ts_cursor_stack.clear()
+        self._ts_next_cursor  = ""
+        self._ts_current_page = 1
+        self._ts_fetch(cursor="")
+
+    def _ts_next_page(self):
+        if not self._ts_next_cursor:
+            return
+        self._ts_cursor_stack.append(self._ts_next_cursor)
+        self._ts_current_page += 1
+        self._ts_fetch(cursor=self._ts_next_cursor)
+
+    def _ts_prev_page(self):
+        if self._ts_current_page <= 1:
+            return
+        self._ts_cursor_stack.pop()  # 当前页 cursor
+        prev = self._ts_cursor_stack[-1] if self._ts_cursor_stack else ""
+        self._ts_current_page -= 1
+        self._ts_fetch(cursor=prev, push_stack=False)
+
+    def _ts_fetch(self, cursor: str, push_stack: bool = True):
+        self._set_status("正在从 Thunderstore 获取数据…")
+        kw = self._search_var.get()
+        threading.Thread(target=self._ts_fetch_worker, args=(kw, cursor), daemon=True).start()
+
+    def _ts_fetch_worker(self, keyword: str, cursor: str):
+        try:
+            data = ts_search(keyword, cursor)
+        except Exception as exc:
+            self.after(0, lambda: self._set_status(f"请求失败: {exc}"))
+            return
+        self.after(0, lambda: self._ts_populate(data))
+
+    def _ts_populate(self, data: dict):
+        self.ts_tree.delete(*self.ts_tree.get_children())
+        self._ts_results.clear()
+        self._ts_next_cursor = ""
+
+        # 解析 next cursor
+        next_url = data.get("next", "")
+        if next_url:
+            parsed = urllib.parse.urlparse(next_url)
+            qs     = urllib.parse.parse_qs(parsed.query)
+            self._ts_next_cursor = qs.get("cursor", [""])[0]
+
+        results = data.get("results", [])
+        # 只保留属于 REPO 社区的包
+        repo_results = []
+        for pkg in results:
+            listings = pkg.get("community_listings", [])
+            if any(l.get("community") == TS_COMMUNITY for l in listings):
+                repo_results.append(pkg)
+
+        for pkg in repo_results:
+            latest  = pkg.get("latest", {})
+            name    = pkg.get("name", "")
+            author  = pkg.get("namespace", "")
+            version = latest.get("version_number", "")
+            dl_cnt  = latest.get("downloads", 0)
+            desc    = latest.get("description", "")[:80]
+            dl_url  = latest.get("download_url", "")
+            self._ts_results.append({"name": name, "author": author, "download_url": dl_url})
+            self.ts_tree.insert("", tk.END, values=(name, author, version, dl_cnt, desc))
+
+        self._page_label.config(text=f"第 {self._ts_current_page} 页")
+        self._set_status(f"找到 {len(repo_results)} 个 REPO MOD（第 {self._ts_current_page} 页）")
+
+    def _ts_install_selected(self):
+        d = self.plugins_dir.get().strip()
+        if not d or not os.path.isdir(d):
+            messagebox.showwarning("警告", "请先设置有效的 plugins 目录。")
+            return
+        sel = self.ts_tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先在列表中选中一个 MOD。")
+            return
+        idx = self.ts_tree.index(sel[0])
+        if idx >= len(self._ts_results):
+            return
+        pkg      = self._ts_results[idx]
+        name     = pkg["name"]
+        dl_url   = pkg["download_url"]
+        if not dl_url:
+            messagebox.showerror("错误", "该 MOD 无可用下载链接。")
+            return
+        if not messagebox.askyesno("确认安装", f"确定要下载并安装以下 MOD 吗？\n\n{pkg['author']}-{name}"):
+            return
+        self._set_status(f"正在下载 {name}…")
+        threading.Thread(
+            target=self._ts_download_worker,
+            args=(name, dl_url, d),
+            daemon=True,
+        ).start()
+
+    def _ts_download_worker(self, name: str, dl_url: str, plugins_dir: str):
+        try:
+            data = ts_download(dl_url)
+        except Exception as exc:
+            self.after(0, lambda: messagebox.showerror("下载失败", str(exc)))
+            self.after(0, lambda: self._set_status("下载失败。"))
+            return
+        ok, msg = install_zip_from_bytes(data, plugins_dir)
+        if ok:
+            self.after(0, lambda: self._set_status(f"✅ {name} 安装完成"))
+            self.after(0, self._refresh_local)
+        else:
+            self.after(0, lambda: messagebox.showerror("安装失败", msg))
+            self.after(0, lambda: self._set_status("安装失败。"))
+
+    def _set_status(self, text: str):
         self.status_var.set(text)
 
 
