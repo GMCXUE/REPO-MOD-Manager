@@ -770,22 +770,16 @@ class App(tk.Tk):
             if not dl_url:
                 raise ValueError("未找到下载链接")
             data = ts_download(dl_url)
-            # BepInExPack ZIP 结构：BepInExPack_REPO_<ver>/BepInExPack_REPO/...
-            # 解压到游戏目录
+            # BepInExPack ZIP 结构：BepInExPack/<BepInEx/...> + 其他文件
+            # 找到顶层唯一文件夹作为前缀，将其内容直接解压到游戏根目录
             buf = io.BytesIO(data)
             with zipfile.ZipFile(buf, "r") as zf:
                 names = zf.namelist()
-                # 找到 BepInEx/ 内容的层级前缀
-                prefix = ""
-                for n in names:
-                    if "bepinex/" in n.lower() and not prefix:
-                        idx = n.lower().index("bepinex/")
-                        prefix = n[:idx]
-                        break
+                # 找顶层文件夹前缀（第一个含 / 的路径段）
+                top_dirs = {n.split("/")[0] for n in names if "/" in n}
+                prefix = (top_dirs.pop() + "/") if len(top_dirs) == 1 else ""
                 for member in names:
-                    if prefix and not member.startswith(prefix):
-                        continue
-                    rel = member[len(prefix):] if prefix else member
+                    rel = member[len(prefix):] if prefix and member.startswith(prefix) else member
                     if not rel or rel.endswith("/"):
                         continue
                     dest = os.path.join(game_dir, rel)
