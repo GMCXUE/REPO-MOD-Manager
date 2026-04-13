@@ -43,21 +43,6 @@ def save_config(data: dict):
 
 
 # ── 常量 ──────────────────────────────────────────────
-STEAM_SUB = r"Steam\steamapps\common\REPO\BepInEx\plugins"
-SEARCH_ROOTS = [
-    r"C:\Program Files (x86)",
-    r"C:\Program Files",
-    r"D:\Program Files (x86)",
-    r"D:\Program Files",
-    r"D:\SteamLibrary",
-    r"E:\Program Files (x86)",
-    r"E:\Program Files",
-    r"E:\SteamLibrary",
-    r"F:\Program Files (x86)",
-    r"F:\Program Files",
-    r"F:\SteamLibrary",
-]
-
 TS_API    = "https://thunderstore.io/c/repo/api/v1/package/"
 PAGE_SIZE = 20
 
@@ -74,12 +59,56 @@ BTN_LIGHT = "#5ba3e8"  # 淡蓝按钮色
 
 
 # ── 本地核心逻辑 ──────────────────────────────────────
-def find_plugins_dir():
-    for root in SEARCH_ROOTS:
-        candidate = os.path.join(root, STEAM_SUB)
+_GAME_SUBPATH = os.path.join("steamapps", "common", "REPO", "BepInEx", "plugins")
+
+def _get_steam_library_paths() -> list:
+    """读取 Steam libraryfolders.vdf，返回所有 Steam 库根目录列表。"""
+    candidates = []
+    # 默认 Steam 安装位置
+    default_roots = [
+        r"C:\Program Files (x86)\Steam",
+        r"C:\Program Files\Steam",
+    ]
+    # 从注册表读取 Steam 实际安装路径（仅 Windows）
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SOFTWARE\WOW6432Node\Valve\Steam")
+        steam_path, _ = winreg.QueryValueEx(key, "InstallPath")
+        winreg.CloseKey(key)
+        default_roots.insert(0, steam_path)
+    except Exception:
+        pass
+
+    for steam_root in default_roots:
+        vdf_path = os.path.join(steam_root, "steamapps", "libraryfolders.vdf")
+        if not os.path.isfile(vdf_path):
+            continue
+        candidates.append(steam_root)
+        try:
+            with open(vdf_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if '"path"' in line.lower():
+                        parts = line.split('"')
+                        # 格式: "path"  "D:\\SteamLibrary"
+                        path_val = parts[-2] if len(parts) >= 2 else ""
+                        path_val = path_val.replace("\\\\", "\\")
+                        if os.path.isdir(path_val):
+                            candidates.append(path_val)
+        except Exception:
+            pass
+        break  # 找到第一个有效 vdf 即可
+    return candidates
+
+
+def find_plugins_dir() -> str:
+    """在所有 Steam 库路径中查找 REPO 的 plugins 目录。"""
+    for lib in _get_steam_library_paths():
+        candidate = os.path.join(lib, _GAME_SUBPATH)
         if os.path.isdir(candidate):
             return candidate
-    return None
+    return ""
 
 
 def list_mods(plugins_dir):
