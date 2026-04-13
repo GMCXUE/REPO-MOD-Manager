@@ -640,7 +640,8 @@ class App(tk.Tk):
         btn_bar = tk.Frame(parent, bg=BG, pady=4)
         btn_bar.pack(fill=tk.X)
         make_btn(btn_bar, "📦 导入 ZIP 安装", self._install_local_zip, GREEN).pack(side=tk.LEFT, padx=(0, 8))
-        make_btn(btn_bar, " 刷新列表",       self._refresh_local,     ACCENT).pack(side=tk.LEFT)
+        make_btn(btn_bar, "🔄 刷新列表",      self._refresh_local,     ACCENT).pack(side=tk.LEFT, padx=(0, 8))
+        make_btn(btn_bar, "🎮 启动游戏",      self._launch_game,       BTN_LIGHT).pack(side=tk.LEFT)
 
         # 卡片滚动区
         grid_outer = tk.Frame(parent, bg=BG)
@@ -674,6 +675,7 @@ class App(tk.Tk):
         search_entry.pack(side=tk.LEFT, padx=(6, 6))
         search_entry.bind("<Return>", lambda _: self._ts_search_start())
         make_btn(search_bar, "🔍 搜索", self._ts_search_start, ACCENT).pack(side=tk.LEFT, padx=(0, 6))
+        make_btn(search_bar, "🇨🇳 中文 MOD", self._ts_filter_chinese, BTN_LIGHT).pack(side=tk.LEFT, padx=(0, 6))
         # 排序下拉框
         self._sort_var = tk.StringVar(value="评分最高")
         sort_cb = ttk.Combobox(
@@ -739,6 +741,29 @@ class App(tk.Tk):
             self.plugins_dir.set("")
             self._set_status("未自动找到 plugins 目录，请手动浏览选择。")
         self._refresh_local()
+
+    def _launch_game(self):
+        game_dir = self.game_dir.get().strip()
+        if not game_dir or not os.path.isdir(game_dir):
+            messagebox.showwarning("警告", "请先设置有效的游戏目录。")
+            return
+        # 优先通过 Steam 协议启动（Steam AppID: 3241660 for R.E.P.O.）
+        try:
+            import subprocess
+            subprocess.Popen(["cmd", "/c", "start", "steam://rungameid/3241660"])
+            self._set_status("正在通过 Steam 启动游戏…")
+            return
+        except Exception:
+            pass
+        # 回退：直接找 .exe 启动
+        exes = [f for f in os.listdir(game_dir) if f.lower().endswith(".exe")
+                and "uninstall" not in f.lower() and "crash" not in f.lower()]
+        if not exes:
+            messagebox.showwarning("未找到", "游戏目录中没有找到可执行文件。")
+            return
+        import subprocess
+        subprocess.Popen([os.path.join(game_dir, exes[0])], cwd=game_dir)
+        self._set_status(f"正在启动: {exes[0]}")
 
     def _browse_game_dir(self):
         d = filedialog.askdirectory(title="选择游戏根目录（含 .exe 的那一层）")
@@ -968,6 +993,15 @@ class App(tk.Tk):
     def _ts_sort_changed(self):
         self._ts_page = 1
         if self._ts_fetched:
+            self._ts_render_page()
+
+    def _ts_filter_chinese(self):
+        self._search_var.set("chinese")
+        self._ts_page = 1
+        if not self._ts_fetched:
+            self._set_status("正在获取 REPO MOD 列表（首次需要约10秒）…")
+            threading.Thread(target=self._ts_fetch_worker, daemon=True).start()
+        else:
             self._ts_render_page()
 
     def _ts_search_start(self):
