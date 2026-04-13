@@ -17,13 +17,14 @@ _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 
-# ── 配置文件（与 exe / 脚本同目录）──────────────────────
-def _app_dir() -> str:
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
+# ── 配置文件（存放到系统 AppData 目录）──────────────────────
+def _config_dir() -> str:
+    appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+    d = os.path.join(appdata, "REPOModManager")
+    os.makedirs(d, exist_ok=True)
+    return d
 
-CONFIG_FILE = os.path.join(_app_dir(), "config.json")
+CONFIG_FILE = os.path.join(_config_dir(), "config.json")
 
 def load_config() -> dict:
     try:
