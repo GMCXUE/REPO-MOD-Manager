@@ -47,6 +47,126 @@ def save_config(data: dict):
 TS_API    = "https://thunderstore.io/c/repo/api/v1/package/"
 PAGE_SIZE = 20
 
+# ── 多语言字典 ─────────────────────────────────────────
+_STRINGS: dict = {
+    # 顶部路径栏
+    "game_dir":           {"zh": "游戏目录:", "zh-tw": "遊戲目錄:", "en": "Game Dir:", "ja": "ゲームフォルダ:", "fr": "Dossier jeu:", "ru": "Папка игры:", "es": "Dir. juego:"},
+    "plugins_dir":        {"zh": "plugins 目录:", "zh-tw": "plugins 目錄:", "en": "Plugins Dir:", "ja": "pluginsフォルダ:", "fr": "Dossier plugins:", "ru": "Папка plugins:", "es": "Dir. plugins:"},
+    "browse":             {"zh": "浏览…", "zh-tw": "瀏覽…", "en": "Browse…", "ja": "参照…", "fr": "Parcourir…", "ru": "Обзор…", "es": "Buscar…"},
+    "install_bepinex":    {"zh": "⬇ 安装 BepInEx", "zh-tw": "⬇ 安裝 BepInEx", "en": "⬇ Install BepInEx", "ja": "⬇ BepInEx導入", "fr": "⬇ Installer BepInEx", "ru": "⬇ Установить BepInEx", "es": "⬇ Instalar BepInEx"},
+    "launch_game":        {"zh": "🎮\n启动游戏", "zh-tw": "🎮\n啟動遊戲", "en": "🎮\nLaunch", "ja": "🎮\n起動", "fr": "🎮\nLancer", "ru": "🎮\nЗапуск", "es": "🎮\nIniciar"},
+    # 标签页
+    "tab_local":          {"zh": "  📂 已安装 MOD  ", "zh-tw": "  📂 已安裝 MOD  ", "en": "  📂 Installed MODs  ", "ja": "  📂 導入済みMOD  ", "fr": "  📂 MODs installés  ", "ru": "  📂 Установленные  ", "es": "  📂 MODs instalados  "},
+    "tab_online":         {"zh": "  🌐 在线浏览安装  ", "zh-tw": "  🌐 線上瀏覽安裝  ", "en": "  🌐 Browse & Install  ", "ja": "  🌐 オンライン  ", "fr": "  🌐 Parcourir & Installer  ", "ru": "  🌐 Обзор и установка  ", "es": "  🌐 Ver e instalar  "},
+    # 本地标签页
+    "import_zip":         {"zh": "📦 导入 ZIP 安装", "zh-tw": "📦 匯入 ZIP 安裝", "en": "📦 Import ZIP", "ja": "📦 ZIPインポート", "fr": "📦 Importer ZIP", "ru": "📦 Импорт ZIP", "es": "📦 Importar ZIP"},
+    "refresh":            {"zh": "🔄 刷新列表", "zh-tw": "🔄 重新整理", "en": "🔄 Refresh", "ja": "🔄 更新", "fr": "🔄 Actualiser", "ru": "🔄 Обновить", "es": "🔄 Actualizar"},
+    "delete":             {"zh": "🗑 删除", "zh-tw": "🗑 刪除", "en": "🗑 Delete", "ja": "🗑 削除", "fr": "🗑 Supprimer", "ru": "🗑 Удалить", "es": "🗑 Eliminar"},
+    "confirm_delete":     {"zh": "确认删除", "zh-tw": "確認刪除", "en": "Confirm Delete", "ja": "削除確認", "fr": "Confirmer la suppression", "ru": "Подтвердить удаление", "es": "Confirmar eliminación"},
+    "confirm_delete_msg": {"zh": "确定要删除以下 MOD 吗？\n\n名称：{name}\n路径：{path}\n\n此操作不可恢复！",
+                           "zh-tw": "確定要刪除以下 MOD 嗎？\n\n名稱：{name}\n路徑：{path}\n\n此操作無法復原！",
+                           "en": "Delete this MOD?\n\nName: {name}\nPath: {path}\n\nThis cannot be undone!",
+                           "ja": "このMODを削除しますか？\n\n名前：{name}\nパス：{path}\n\nこの操作は元に戻せません！",
+                           "fr": "Supprimer ce MOD ?\n\nNom : {name}\nChemin : {path}\n\nCette action est irréversible !",
+                           "ru": "Удалить этот MOD?\n\nИмя: {name}\nПуть: {path}\n\nЭто действие необратимо!",
+                           "es": "¿Eliminar este MOD?\n\nNombre: {name}\nRuta: {path}\n\n¡Esta acción es irreversible!"},
+    "delete_ok":          {"zh": "已删除: {name}", "zh-tw": "已刪除: {name}", "en": "Deleted: {name}", "ja": "削除しました: {name}", "fr": "Supprimé : {name}", "ru": "Удалено: {name}", "es": "Eliminado: {name}"},
+    "delete_fail":        {"zh": "删除失败", "zh-tw": "刪除失敗", "en": "Delete Failed", "ja": "削除失敗", "fr": "Échec de la suppression", "ru": "Ошибка удаления", "es": "Error al eliminar"},
+    "folder":             {"zh": "文件夹", "zh-tw": "資料夾", "en": "Folder", "ja": "フォルダ", "fr": "Dossier", "ru": "Папка", "es": "Carpeta"},
+    "dll":                {"zh": ".dll", "zh-tw": ".dll", "en": ".dll", "ja": ".dll", "fr": ".dll", "ru": ".dll", "es": ".dll"},
+    "mods_found":         {"zh": "共找到 {n} 个 MOD。", "zh-tw": "共找到 {n} 個 MOD。", "en": "Found {n} MOD(s).", "ja": "{n} 個のMODが見つかりました。", "fr": "{n} MOD(s) trouvé(s).", "ru": "Найдено MOD: {n}.", "es": "Se encontraron {n} MOD(s)."},
+    "invalid_plugins":    {"zh": "plugins 目录无效，请重新选择。", "zh-tw": "plugins 目錄無效，請重新選擇。", "en": "Invalid plugins directory.", "ja": "pluginsフォルダが無効です。再選択してください。", "fr": "Dossier plugins invalide.", "ru": "Неверная папка plugins.", "es": "Directorio plugins no válido."},
+    # 在线标签页
+    "search":             {"zh": "搜索:", "zh-tw": "搜尋:", "en": "Search:", "ja": "検索:", "fr": "Recherche :", "ru": "Поиск:", "es": "Buscar:"},
+    "search_btn":         {"zh": "🔍 搜索", "zh-tw": "🔍 搜尋", "en": "🔍 Search", "ja": "🔍 検索", "fr": "🔍 Chercher", "ru": "🔍 Найти", "es": "🔍 Buscar"},
+    "chinese_mods":       {"zh": "🇨🇳 中文 MOD", "zh-tw": "🇨🇳 中文 MOD", "en": "🇨🇳 Chinese MOD", "ja": "🇨🇳 中国語MOD", "fr": "🇨🇳 MODs chinois", "ru": "🇨🇳 Китайские MOD", "es": "🇨🇳 MODs chinos"},
+    "prev_page":          {"zh": "⬅ 上一页", "zh-tw": "⬅ 上一頁", "en": "⬅ Prev", "ja": "⬅ 前へ", "fr": "⬅ Préc.", "ru": "⬅ Назад", "es": "⬅ Ant."},
+    "next_page":          {"zh": "下一页 ➡", "zh-tw": "下一頁 ➡", "en": "Next ➡", "ja": "次へ ➡", "fr": "Suiv. ➡", "ru": "Вперёд ➡", "es": "Sig. ➡"},
+    "page_label":         {"zh": "第 {p} 页", "zh-tw": "第 {p} 頁", "en": "Page {p}", "ja": "{p} ページ", "fr": "Page {p}", "ru": "Стр. {p}", "es": "Pág. {p}"},
+    "translate_btn":      {"zh": "🌐 翻译", "zh-tw": "🌐 翻譯", "en": "🌐 Translate", "ja": "🌐 翻訳", "fr": "🌐 Traduire", "ru": "🌐 Перевод", "es": "🌐 Traducir"},
+    "sort_options":       {"zh": ["最后更新", "最新", "下载最多", "评分最高"],
+                           "zh-tw": ["最後更新", "最新", "下載最多", "評分最高"],
+                           "en": ["Last Updated", "Newest", "Most Downloaded", "Top Rated"],
+                           "ja": ["最終更新", "最新", "DL数順", "高評価"],
+                           "fr": ["Dernière MàJ", "Nouveaux", "Plus téléchargés", "Mieux notés"],
+                           "ru": ["Обновлённые", "Новые", "Популярные", "Топ рейтинга"],
+                           "es": ["Últ. actualiz.", "Más nuevos", "Más descargados", "Mejor valorados"]},
+    "install_btn":        {"zh": "⬇ 下载并安装", "zh-tw": "⬇ 下載並安裝", "en": "⬇ Install", "ja": "⬇ インストール", "fr": "⬇ Installer", "ru": "⬇ Установить", "es": "⬇ Instalar"},
+    "installed_badge":    {"zh": "✅ 已安装", "zh-tw": "✅ 已安裝", "en": "✅ Installed", "ja": "✅ 導入済み", "fr": "✅ Installé", "ru": "✅ Установлен", "es": "✅ Instalado"},
+    "downloads":          {"zh": "⬇ {n}", "zh-tw": "⬇ {n}", "en": "⬇ {n}", "ja": "⬇ {n}", "fr": "⬇ {n}", "ru": "⬇ {n}", "es": "⬇ {n}"},
+    # 状态消息
+    "ready":              {"zh": "就绪", "zh-tw": "就緒", "en": "Ready", "ja": "準備完了", "fr": "Prêt", "ru": "Готово", "es": "Listo"},
+    "auto_found":         {"zh": "已自动定位: {p}", "zh-tw": "已自動定位: {p}", "en": "Auto-detected: {p}", "ja": "自動検出: {p}", "fr": "Détecté auto. : {p}", "ru": "Авто-обнаружено: {p}", "es": "Detectado auto.: {p}"},
+    "not_found":          {"zh": "未自动找到 plugins 目录，请手动浏览选择。",
+                           "zh-tw": "未自動找到 plugins 目錄，請手動瀏覽選擇。",
+                           "en": "plugins dir not found. Please select manually.",
+                           "ja": "pluginsフォルダが見つかりません。手動で選択してください。",
+                           "fr": "Dossier plugins introuvable. Sélectionnez manuellement.",
+                           "ru": "Папка plugins не найдена. Выберите вручную.",
+                           "es": "No se encontró plugins. Seleccione manualmente."},
+    "loading_list":       {"zh": "正在获取 REPO MOD 列表（首次需要约10秒）…",
+                           "zh-tw": "正在獲取 REPO MOD 列表（首次需要約10秒）…",
+                           "en": "Loading MOD list (first time ~10s)…",
+                           "ja": "MODリストを取得中（初回は約10秒）…",
+                           "fr": "Chargement de la liste MOD (~10s)…",
+                           "ru": "Загрузка списка MOD (~10 сек)…",
+                           "es": "Cargando lista de MODs (~10s)…"},
+    "fetch_fail":         {"zh": "拉取失败: {e}", "zh-tw": "拉取失敗: {e}", "en": "Fetch failed: {e}", "ja": "取得失敗: {e}", "fr": "Échec : {e}", "ru": "Ошибка загрузки: {e}", "es": "Error: {e}"},
+    "launch_steam":       {"zh": "正在通过 Steam 启动游戏…", "zh-tw": "正在透過 Steam 啟動遊戲…", "en": "Launching via Steam…", "ja": "Steam経由で起動中…", "fr": "Lancement via Steam…", "ru": "Запуск через Steam…", "es": "Iniciando via Steam…"},
+    "launch_exe":         {"zh": "正在启动: {f}", "zh-tw": "正在啟動: {f}", "en": "Launching: {f}", "ja": "起動中: {f}", "fr": "Lancement : {f}", "ru": "Запуск: {f}", "es": "Iniciando: {f}"},
+    "no_exe":             {"zh": "游戏目录中没有找到可执行文件。", "zh-tw": "遊戲目錄中沒有找到可執行檔。", "en": "No executable found in game directory.", "ja": "実行ファイルが見つかりません。", "fr": "Aucun exécutable trouvé.", "ru": "Исполняемый файл не найден.", "es": "No se encontró ejecutable."},
+    "warn_no_gamedir":    {"zh": "请先设置有效的游戏目录。", "zh-tw": "請先設定有效的遊戲目錄。", "en": "Please set a valid game directory first.", "ja": "有効なゲームフォルダを設定してください。", "fr": "Veuillez d'abord définir un dossier de jeu valide.", "ru": "Сначала укажите папку с игрой.", "es": "Configure primero el directorio del juego."},
+    "bepinex_confirm":    {"zh": "将从 Thunderstore 下载 BepInExPack 并安装到游戏目录。\n确定继续？",
+                           "zh-tw": "將從 Thunderstore 下載 BepInExPack 並安裝到遊戲目錄。\n確定繼續？",
+                           "en": "Download BepInExPack from Thunderstore and install to game directory?\nContinue?",
+                           "ja": "ThunderstoreからBepInExPackをダウンロードしてゲームフォルダにインストールします。\n続行しますか？",
+                           "fr": "Télécharger BepInExPack depuis Thunderstore et l'installer ?\nContinuer ?",
+                           "ru": "Скачать BepInExPack с Thunderstore и установить в папку игры?\nПродолжить?",
+                           "es": "¿Descargar BepInExPack desde Thunderstore e instalar?\n¿Continuar?"},
+    "bepinex_confirm_title": {"zh": "确认安装", "zh-tw": "確認安裝", "en": "Confirm Install", "ja": "インストール確認", "fr": "Confirmer l'installation", "ru": "Подтвердить установку", "es": "Confirmar instalación"},
+    "bepinex_downloading": {"zh": "正在下载 BepInExPack…", "zh-tw": "正在下載 BepInExPack…", "en": "Downloading BepInExPack…", "ja": "BepInExPackをダウンロード中…", "fr": "Téléchargement de BepInExPack…", "ru": "Загрузка BepInExPack…", "es": "Descargando BepInExPack…"},
+    "bepinex_ok":         {"zh": "✅ BepInEx 安装完成！请先运行一次游戏再关闭，然后即可安装 MOD。",
+                           "zh-tw": "✅ BepInEx 安裝完成！請先運行一次遊戲再關閉，然後即可安裝 MOD。",
+                           "en": "✅ BepInEx installed! Run the game once then close it, then install MODs.",
+                           "ja": "✅ BepInEx導入完了！ゲームを一度起動して閉じてからMODを導入してください。",
+                           "fr": "✅ BepInEx installé ! Lancez le jeu une fois, fermez-le, puis installez les MODs.",
+                           "ru": "✅ BepInEx установлен! Запустите игру один раз, закройте, затем устанавливайте MOD.",
+                           "es": "✅ BepInEx instalado. Ejecute el juego una vez, ciérrelo y luego instale MODs."},
+    "bepinex_fail":       {"zh": "BepInEx 安装失败：{e}", "zh-tw": "BepInEx 安裝失敗：{e}", "en": "BepInEx install failed: {e}", "ja": "BepInEx導入失敗：{e}", "fr": "Échec BepInEx : {e}", "ru": "Ошибка BepInEx: {e}", "es": "Error BepInEx: {e}"},
+    "install_fail_title": {"zh": "安装失败", "zh-tw": "安裝失敗", "en": "Install Failed", "ja": "インストール失敗", "fr": "Échec installation", "ru": "Ошибка установки", "es": "Error de instalación"},
+    "install_ok":         {"zh": "✅ {name} 安装完成（共安装 {n} 个包）",
+                           "zh-tw": "✅ {name} 安裝完成（共安裝 {n} 個套件）",
+                           "en": "✅ {name} installed ({n} package(s))",
+                           "ja": "✅ {name} 導入完了（{n} 個）",
+                           "fr": "✅ {name} installé ({n} paquet(s))",
+                           "ru": "✅ {name} установлен ({n} пакет(ов))",
+                           "es": "✅ {name} instalado ({n} paquete(s))"},
+    "config_loaded":      {"zh": "已从配置加载路径: {p}", "zh-tw": "已從設定載入路徑: {p}", "en": "Loaded path from config: {p}", "ja": "設定からパスを読み込みました: {p}", "fr": "Chemin chargé : {p}", "ru": "Путь загружен: {p}", "es": "Ruta cargada: {p}"},
+    # 设置
+    "language":           {"zh": "语言:", "zh-tw": "語言:", "en": "Language:", "ja": "言語:", "fr": "Langue :", "ru": "Язык:", "es": "Idioma:"},
+    "lang_restart":       {"zh": "语言已保存，重启后生效。", "zh-tw": "語言已儲存，重啟後生效。", "en": "Language saved. Restart to apply.", "ja": "言語を保存しました。再起動後に反映されます。", "fr": "Langue sauvegardée.", "ru": "Язык сохранён.", "es": "Idioma guardado."},
+    # 窗口标题
+    "window_title":       {"zh": "REPOKit — REPO MOD 管理器", "zh-tw": "REPOKit — REPO MOD 管理器", "en": "REPOKit — REPO MOD Manager", "ja": "REPOKit — REPO MOD マネージャー", "fr": "REPOKit — Gestionnaire de MODs REPO", "ru": "REPOKit — Менеджер MOD REPO", "es": "REPOKit — Gestor de MODs REPO"},
+    # 详情弹窗
+    "detail_close":       {"zh": "关闭", "zh-tw": "關閉", "en": "Close", "ja": "閉じる", "fr": "Fermer", "ru": "Закрыть", "es": "Cerrar"},
+    "detail_deps":        {"zh": "依赖:", "zh-tw": "依賴:", "en": "Dependencies:", "ja": "依存:", "fr": "Dépendances :", "ru": "Зависимости:", "es": "Dependencias:"},
+    "detail_version":     {"zh": "版本:", "zh-tw": "版本:", "en": "Version:", "ja": "バージョン:", "fr": "Version :", "ru": "Версия:", "es": "Versión:"},
+    "detail_author":      {"zh": "作者:", "zh-tw": "作者:", "en": "Author:", "ja": "作者:", "fr": "Auteur :", "ru": "Автор:", "es": "Autor:"},
+    "detail_downloads":   {"zh": "下载:", "zh-tw": "下載:", "en": "Downloads:", "ja": "DL数:", "fr": "Téléch. :", "ru": "Загрузок:", "es": "Descargas:"},
+    "detail_translate":   {"zh": "🌐 翻译为中文", "zh-tw": "🌐 翻譯為中文", "en": "🌐 Translate", "ja": "🌐 翻訳", "fr": "🌐 Traduire", "ru": "🌐 Перевести", "es": "🌐 Traducir"},
+    "translating":        {"zh": "翻译中…", "zh-tw": "翻譯中…", "en": "Translating…", "ja": "翻訳中…", "fr": "Traduction…", "ru": "Перевод…", "es": "Traduciendo…"},
+    "no_desc":            {"zh": "（无简介）", "zh-tw": "（無簡介）", "en": "(No description)", "ja": "（説明なし）", "fr": "(Pas de description)", "ru": "(Нет описания)", "es": "(Sin descripción)"},
+    "warn_title":         {"zh": "警告", "zh-tw": "警告", "en": "Warning", "ja": "警告", "fr": "Avertissement", "ru": "Предупреждение", "es": "Advertencia"},
+    "confirm_title":      {"zh": "确认", "zh-tw": "確認", "en": "Confirm", "ja": "確認", "fr": "Confirmer", "ru": "Подтвердить", "es": "Confirmar"},
+}
+
+_LANG: str = load_config().get("lang", "zh")
+
+def t(key: str, **kwargs) -> str:
+    """根据当前语言返回对应文字，支持 {变量} 格式化。"""
+    s = _STRINGS.get(key, {}).get(_LANG, _STRINGS.get(key, {}).get("zh", key))
+    return s.format(**kwargs) if kwargs else s
+
 # ── 颜色主题 ──────────────────────────────────────────
 BG        = "#f0f4fa"
 PANEL     = "#ffffff"
@@ -559,7 +679,7 @@ def make_label_btn(parent, text, cmd, color, font_size=8):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("REPOKit — REPO MOD 管理器")
+        self.title(t("window_title"))
         self.geometry("900x580")
         self.minsize(720, 460)
         self.configure(bg=BG)
@@ -568,13 +688,13 @@ class App(tk.Tk):
         cfg = load_config()
         self.plugins_dir = tk.StringVar(value=cfg.get("plugins_dir", "正在扫描…"))
         self.game_dir    = tk.StringVar(value=cfg.get("game_dir", ""))
-        self.status_var   = tk.StringVar(value="就绪")
+        self.status_var   = tk.StringVar(value=t("ready"))
         self._mods        = []
 
         self._build_ui()
         # 若配置中已有路径则跳过自动扫描，否则后台扫描
         if cfg.get("plugins_dir"):
-            self._set_status(f"已从配置加载路径: {cfg['plugins_dir']}")
+            self._set_status(t("config_loaded", p=cfg['plugins_dir']))
             threading.Thread(target=self._refresh_local, daemon=True).start()
         else:
             threading.Thread(target=self._auto_scan, daemon=True).start()
@@ -585,9 +705,9 @@ class App(tk.Tk):
         header = tk.Frame(self, bg=BG, pady=4)
         header.pack(fill=tk.X, padx=12)
 
-        # 右侧：启动游戏大按钮（跨两行）
+        # 右侧：启动游戏大按钮
         launch_btn = tk.Label(
-            header, text="🎮\n启动游戏",
+            header, text=t("launch_game"),
             bg=GREEN, fg="#ffffff",
             font=("Segoe UI", 11, "bold"),
             padx=14, pady=8, cursor="hand2",
@@ -605,25 +725,25 @@ class App(tk.Tk):
         # 第一行：游戏根目录
         row1 = tk.Frame(rows, bg=BG, pady=2)
         row1.pack(fill=tk.X)
-        tk.Label(row1, text="游戏目录:", bg=BG, fg=DIM, font=("Segoe UI", 9), width=9, anchor=tk.E).pack(side=tk.LEFT)
+        tk.Label(row1, text=t("game_dir"), bg=BG, fg=DIM, font=("Segoe UI", 9), width=9, anchor=tk.E).pack(side=tk.LEFT)
         tk.Entry(
             row1, textvariable=self.game_dir,
             bg=PANEL, fg=FG, insertbackground=FG,
             relief=tk.FLAT, font=("Segoe UI", 9), bd=4,
         ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
-        make_btn(row1, "浏览…", self._browse_game_dir, ACCENT).pack(side=tk.LEFT, padx=(0, 6))
-        make_btn(row1, "⬇ 安装 BepInEx", self._install_bepinex, GREEN).pack(side=tk.LEFT)
+        make_btn(row1, t("browse"), self._browse_game_dir, ACCENT).pack(side=tk.LEFT, padx=(0, 6))
+        make_btn(row1, t("install_bepinex"), self._install_bepinex, GREEN).pack(side=tk.LEFT)
 
         # 第二行：plugins 目录
         row2 = tk.Frame(rows, bg=BG, pady=2)
         row2.pack(fill=tk.X)
-        tk.Label(row2, text="plugins 目录:", bg=BG, fg=DIM, font=("Segoe UI", 9), width=9, anchor=tk.E).pack(side=tk.LEFT)
+        tk.Label(row2, text=t("plugins_dir"), bg=BG, fg=DIM, font=("Segoe UI", 9), width=9, anchor=tk.E).pack(side=tk.LEFT)
         tk.Entry(
             row2, textvariable=self.plugins_dir,
             bg=PANEL, fg=FG, insertbackground=FG,
             relief=tk.FLAT, font=("Segoe UI", 9), bd=4,
         ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
-        make_btn(row2, "浏览…", self._browse_dir, ACCENT).pack(side=tk.LEFT)
+        make_btn(row2, t("browse"), self._browse_dir, ACCENT).pack(side=tk.LEFT)
 
         # Notebook
         style = ttk.Style(self)
@@ -644,8 +764,20 @@ class App(tk.Tk):
 
         tab_local  = tk.Frame(nb, bg=BG)
         tab_online = tk.Frame(nb, bg=BG)
-        nb.add(tab_local,  text="  📂 已安装 MOD  ")
-        nb.add(tab_online, text="  🌐 在线浏览安装  ")
+        nb.add(tab_local,  text=t("tab_local"))
+        nb.add(tab_online, text=t("tab_online"))
+
+        # 语言切换下拉框：叠加在 Notebook Tab 行右侧（place 定位）
+        _LANG_DISPLAY = {"zh": "中文", "zh-tw": "繁體中文", "en": "English", "ja": "日本語", "fr": "Français", "ru": "Русский", "es": "Español"}
+        _LANG_CODE    = {v: k for k, v in _LANG_DISPLAY.items()}
+        self._lang_display_map = _LANG_CODE
+        self._lang_var = tk.StringVar(value=_LANG_DISPLAY.get(_LANG, "中文"))
+        lang_cb = ttk.Combobox(
+            nb, textvariable=self._lang_var,
+            values=list(_LANG_DISPLAY.values()), state="readonly", width=9, font=("Segoe UI", 8),
+        )
+        lang_cb.place(relx=1.0, rely=0, anchor="ne", y=4)
+        lang_cb.bind("<<ComboboxSelected>>", lambda _: self._switch_lang())
 
         self._build_local_tab(tab_local)
         self._build_online_tab(tab_online)
@@ -660,8 +792,8 @@ class App(tk.Tk):
     def _build_local_tab(self, parent):
         btn_bar = tk.Frame(parent, bg=BG, pady=4)
         btn_bar.pack(fill=tk.X)
-        make_btn(btn_bar, "📦 导入 ZIP 安装", self._install_local_zip, GREEN).pack(side=tk.LEFT, padx=(0, 8))
-        make_btn(btn_bar, "🔄 刷新列表",      self._refresh_local,     ACCENT).pack(side=tk.LEFT)
+        make_btn(btn_bar, t("import_zip"), self._install_local_zip, GREEN).pack(side=tk.LEFT, padx=(0, 8))
+        make_btn(btn_bar, t("refresh"),     self._refresh_local,     ACCENT).pack(side=tk.LEFT)
 
         # 卡片滚动区
         grid_outer = tk.Frame(parent, bg=BG)
@@ -685,7 +817,7 @@ class App(tk.Tk):
         # 搜索栏
         search_bar = tk.Frame(parent, bg=BG, pady=4)
         search_bar.pack(fill=tk.X)
-        tk.Label(search_bar, text="搜索:", bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        tk.Label(search_bar, text=t("search"), bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side=tk.LEFT)
         self._search_var = tk.StringVar()
         search_entry = tk.Entry(
             search_bar, textvariable=self._search_var,
@@ -694,8 +826,8 @@ class App(tk.Tk):
         )
         search_entry.pack(side=tk.LEFT, padx=(6, 6))
         search_entry.bind("<Return>", lambda _: self._ts_search_start())
-        make_btn(search_bar, "🔍 搜索", self._ts_search_start, ACCENT).pack(side=tk.LEFT, padx=(0, 6))
-        make_btn(search_bar, "🇨🇳 中文 MOD", self._ts_filter_chinese, BTN_LIGHT).pack(side=tk.LEFT, padx=(0, 6))
+        make_btn(search_bar, t("search_btn"),   self._ts_search_start,   ACCENT).pack(side=tk.LEFT, padx=(0, 6))
+        make_btn(search_bar, t("chinese_mods"),  self._ts_filter_chinese, BTN_LIGHT).pack(side=tk.LEFT, padx=(0, 6))
         # 排序下拉框
         self._sort_var = tk.StringVar(value="评分最高")
         sort_cb = ttk.Combobox(
@@ -705,11 +837,11 @@ class App(tk.Tk):
         )
         sort_cb.pack(side=tk.LEFT, padx=(0, 6))
         sort_cb.bind("<<ComboboxSelected>>", lambda _: self._ts_sort_changed())
-        make_btn(search_bar, "⬅ 上一页", self._ts_prev_page, BTN_LIGHT).pack(side=tk.LEFT, padx=(0, 2))
-        self._page_label = tk.Label(search_bar, text="第 1 页", bg=BG, fg=DIM, font=("Segoe UI", 9))
+        make_btn(search_bar, t("prev_page"), self._ts_prev_page, BTN_LIGHT).pack(side=tk.LEFT, padx=(0, 2))
+        self._page_label = tk.Label(search_bar, text=t("page_label", p=1), bg=BG, fg=DIM, font=("Segoe UI", 9))
         self._page_label.pack(side=tk.LEFT, padx=4)
-        make_btn(search_bar, "下一页 ➡", self._ts_next_page, BTN_LIGHT).pack(side=tk.LEFT, padx=(2, 0))
-        self._trans_list_btn = make_btn(search_bar, "🌐 翻译", self._translate_list, BTN_LIGHT)
+        make_btn(search_bar, t("next_page"), self._ts_next_page, BTN_LIGHT).pack(side=tk.LEFT, padx=(2, 0))
+        self._trans_list_btn = make_btn(search_bar, t("translate_btn"), self._translate_list, BTN_LIGHT)
         self._trans_list_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         # 卡片滚动区
@@ -756,22 +888,22 @@ class App(tk.Tk):
             if os.path.isdir(game_root) and not self.game_dir.get().strip():
                 self.game_dir.set(game_root)
                 save_config({"game_dir": game_root})
-            self._set_status(f"已自动定位: {found}")
+            self._set_status(t("auto_found", p=found))
         else:
             self.plugins_dir.set("")
-            self._set_status("未自动找到 plugins 目录，请手动浏览选择。")
+            self._set_status(t("not_found"))
         self._refresh_local()
 
     def _launch_game(self):
         game_dir = self.game_dir.get().strip()
         if not game_dir or not os.path.isdir(game_dir):
-            messagebox.showwarning("警告", "请先设置有效的游戏目录。")
+            messagebox.showwarning(t("warn_title"), t("warn_no_gamedir"))
             return
         # 优先通过 Steam 协议启动（Steam AppID: 3241660 for R.E.P.O.）
         try:
             import subprocess
             subprocess.Popen(["cmd", "/c", "start", "steam://rungameid/3241660"])
-            self._set_status("正在通过 Steam 启动游戏…")
+            self._set_status(t("launch_steam"))
             return
         except Exception:
             pass
@@ -779,11 +911,22 @@ class App(tk.Tk):
         exes = [f for f in os.listdir(game_dir) if f.lower().endswith(".exe")
                 and "uninstall" not in f.lower() and "crash" not in f.lower()]
         if not exes:
-            messagebox.showwarning("未找到", "游戏目录中没有找到可执行文件。")
+            messagebox.showwarning(t("warn_title"), t("no_exe"))
             return
         import subprocess
         subprocess.Popen([os.path.join(game_dir, exes[0])], cwd=game_dir)
-        self._set_status(f"正在启动: {exes[0]}")
+        self._set_status(t("launch_exe", f=exes[0]))
+
+    def _switch_lang(self):
+        global _LANG
+        _LANG = self._lang_display_map.get(self._lang_var.get(), "zh")
+        save_config({"lang": _LANG})
+        # 销毁所有子 widget 并重建 UI
+        for w in self.winfo_children():
+            w.destroy()
+        self.title(t("window_title"))
+        self._build_ui()
+        self._refresh_local()
 
     def _browse_game_dir(self):
         d = filedialog.askdirectory(title="选择游戏根目录（含 .exe 的那一层）")
@@ -795,12 +938,11 @@ class App(tk.Tk):
     def _install_bepinex(self):
         game_dir = self.game_dir.get().strip()
         if not game_dir or not os.path.isdir(game_dir):
-            messagebox.showwarning("警告", "请先设置有效的游戏目录。")
+            messagebox.showwarning(t("warn_title"), t("warn_no_gamedir"))
             return
-        if not messagebox.askyesno("确认安装",
-                "将从 Thunderstore 下载 BepInExPack 并安装到游戏目录。\n确定继续？"):
+        if not messagebox.askyesno(t("bepinex_confirm_title"), t("bepinex_confirm")):
             return
-        self._set_status("正在下载 BepInExPack…")
+        self._set_status(t("bepinex_downloading"))
         threading.Thread(target=self._bepinex_install_worker,
                          args=(game_dir,), daemon=True).start()
 
@@ -831,10 +973,10 @@ class App(tk.Tk):
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     with zf.open(member) as src, open(dest, "wb") as dst:
                         dst.write(src.read())
-            self.after(0, lambda: self._set_status("✅ BepInEx 安装完成！请先运行一次游戏再关闭，然后即可安装 MOD。"))
+            self.after(0, lambda: self._set_status(t("bepinex_ok")))
         except Exception as exc:
-            self.after(0, lambda e=str(exc): messagebox.showerror("安装失败", f"BepInEx 安装失败：{e}"))
-            self.after(0, lambda: self._set_status("BepInEx 安装失败。"))
+            self.after(0, lambda e=str(exc): messagebox.showerror(t("install_fail_title"), t("bepinex_fail", e=e)))
+            self.after(0, lambda: self._set_status(t("bepinex_fail", e="")))
 
     def _browse_dir(self):
         d = filedialog.askdirectory(title="选择 BepInEx/plugins 目录")
