@@ -814,13 +814,28 @@ class App(tk.Tk):
             self._relayout_cards()
 
     def _on_mousewheel(self, event):
+        # 根据事件来源决定滚动哪个 Canvas
+        w = event.widget
+        canvas = None
+        while w:
+            if w is self._local_canvas:
+                canvas = self._local_canvas
+                break
+            if w is self._card_canvas:
+                canvas = self._card_canvas
+                break
+            try:
+                w = w.master
+            except Exception:
+                break
+        if canvas is None:
+            canvas = self._card_canvas
         if event.num == 4:
-            self._card_canvas.yview_scroll(-1, "units")
+            canvas.yview_scroll(-1, "units")
         elif event.num == 5:
-            self._card_canvas.yview_scroll(1, "units")
+            canvas.yview_scroll(1, "units")
         else:
-            # macOS 触摸板 delta 单位是像素，除以 4 使滚动更平滑
-            self._card_canvas.yview_scroll(int(-1 * (event.delta / 4)), "units")
+            canvas.yview_scroll(int(-1 * (event.delta / 4)), "units")
 
     def _bind_scroll(self, widget):
         """\u9012归绑定 widget 及其全部子组件的滚轮事件。"""
