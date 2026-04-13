@@ -130,38 +130,38 @@ def delete_mod(mod_path):
 _icon_cache: dict = {}  # url -> PhotoImage，避免重复下载
 
 
-_MS_TRANSLATE_URL = "https://api-edge.cognitive.microsofttranslator.com/translate"
-_MS_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
-    "Content-Type": "application/json",
-}
+_BATCH_SEP = " |||| "
 
 
 def translate_to_zh(text: str) -> str:
-    """调用 Microsoft Edge Translator API 将英文翻译为中文（国内无需梯子）。"""
+    """调用 Google 免费翻译接口将英文翻译为中文。"""
     if not text.strip():
         return text
-    params = urllib.parse.urlencode({"api-version": "3.0", "from": "en", "to": "zh-Hans"})
-    url = _MS_TRANSLATE_URL + "?" + params
-    body = json.dumps([{"Text": text[:5000]}]).encode("utf-8")
-    req = urllib.request.Request(url, data=body, headers=_MS_HEADERS, method="POST")
+    params = urllib.parse.urlencode({"client": "gtx", "sl": "en", "tl": "zh-CN", "dt": "t", "q": text})
+    url = "https://translate.googleapis.com/translate_a/single?" + params
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
         data = json.loads(resp.read().decode())
-    return data[0]["translations"][0]["text"]
+    return "".join(seg[0] for seg in data[0] if seg[0])
 
 
 def translate_batch(texts: list) -> list:
-    """批量翻译，每条独立请求 Microsoft Edge Translator，返回等长结果列表。"""
+    """一次请求批量翻译多条文本，用 |||| 分隔，返回等长结果列表。"""
     if not texts:
         return []
-    params = urllib.parse.urlencode({"api-version": "3.0", "from": "en", "to": "zh-Hans"})
-    url = _MS_TRANSLATE_URL + "?" + params
-    body = json.dumps([{"Text": (t[:500] if t and t.strip() else "")} for t in texts]).encode("utf-8")
-    req = urllib.request.Request(url, data=body, headers=_MS_HEADERS, method="POST")
+    n = len(texts)
+    cleaned = [(t[:200].replace("||||", "") if t and t.strip() else " ") for t in texts]
+    joined = _BATCH_SEP.join(cleaned)
+    params = urllib.parse.urlencode({"client": "gtx", "sl": "en", "tl": "zh-CN", "dt": "t", "q": joined})
+    url = "https://translate.googleapis.com/translate_a/single?" + params
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as resp:
         data = json.loads(resp.read().decode())
-    return [item["translations"][0]["text"] for item in data]
+    translated = "".join(seg[0] for seg in data[0] if seg[0])
+    parts = translated.split("||||")
+    while len(parts) < n:
+        parts.append("")
+    return [p.strip() for p in parts[:n]]
 
 
 _ts_all: list = []   # 全量包缓存
