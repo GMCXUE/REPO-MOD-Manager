@@ -130,40 +130,38 @@ def delete_mod(mod_path):
 _icon_cache: dict = {}  # url -> PhotoImage，避免重复下载
 
 
+_MS_TRANSLATE_URL = "https://api-edge.cognitive.microsofttranslator.com/translate"
+_MS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
+    "Content-Type": "application/json",
+}
+
+
 def translate_to_zh(text: str) -> str:
-    """调用 Google 免费翻译接口将英文翻译为中文。"""
+    """调用 Microsoft Edge Translator API 将英文翻译为中文（国内无需梯子）。"""
     if not text.strip():
         return text
-    params = urllib.parse.urlencode({"client": "gtx", "sl": "en", "tl": "zh-CN", "dt": "t", "q": text})
-    url = "https://translate.googleapis.com/translate_a/single?" + params
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    params = urllib.parse.urlencode({"api-version": "3.0", "from": "en", "to": "zh-Hans"})
+    url = _MS_TRANSLATE_URL + "?" + params
+    body = json.dumps([{"Text": text[:5000]}]).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers=_MS_HEADERS, method="POST")
     with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
         data = json.loads(resp.read().decode())
-    return "".join(seg[0] for seg in data[0] if seg[0])
+    return data[0]["translations"][0]["text"]
 
-
-_BATCH_SEP = " |||| "
 
 def translate_batch(texts: list) -> list:
-    """一次请求翻译多条文本，返回等长结果列表。"""
+    """批量翻译，每条独立请求 Microsoft Edge Translator，返回等长结果列表。"""
     if not texts:
         return []
-    n = len(texts)
-    # 清理文本：截断并去掉内部可能存在的分隔符
-    cleaned = [(t[:200].replace("||||", "") if t and t.strip() else " ") for t in texts]
-    joined = _BATCH_SEP.join(cleaned)
-    params = urllib.parse.urlencode({"client": "gtx", "sl": "en", "tl": "zh-CN", "dt": "t", "q": joined})
-    url = "https://translate.googleapis.com/translate_a/single?" + params
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    params = urllib.parse.urlencode({"api-version": "3.0", "from": "en", "to": "zh-Hans"})
+    url = _MS_TRANSLATE_URL + "?" + params
+    body = json.dumps([{"Text": (t[:500] if t and t.strip() else "")} for t in texts]).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers=_MS_HEADERS, method="POST")
     with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as resp:
         data = json.loads(resp.read().decode())
-    translated = "".join(seg[0] for seg in data[0] if seg[0])
-    # |||| 是纯符号，Google 翻译会原样保留
-    parts = translated.split("||||")
-    # 补齐到原长度
-    while len(parts) < n:
-        parts.append("")
-    return [p.strip() for p in parts[:n]]
+    return [item["translations"][0]["text"] for item in data]
 
 
 _ts_all: list = []   # 全量包缓存
@@ -612,6 +610,7 @@ class App(tk.Tk):
         self._ts_results     = []
         self._card_img_refs: list = []
         self._installed_names: set = set()  # 本地已安装包名集合（小写）
+        self._render_gen: int = 0             # 渲染代次，用于丢弃过期翻译回调
 
     # ── 本地标签页逻辑 ────────────────────────────────
     def _auto_scan(self):
@@ -762,6 +761,8 @@ class App(tk.Tk):
         self.after(0, self._ts_render_page)
 
     def _ts_render_page(self):
+        self._render_gen += 1          # 翻页/刷新时代次递增，令旧翻译回调失效
+        gen = self._render_gen
         kw   = self._search_var.get()
         data = ts_get_page(kw, self._ts_page)
         self._ts_page        = data["page"]
@@ -769,17 +770,16 @@ class App(tk.Tk):
         self._ts_render(data)
         if self._ts_translated:
             self._set_trans_list_btn("🔄 原文", self._restore_list)
-            # 翻译模式下，找出当前页尚未翻译的条目，异步翻译
             untranslated = [
-                (i, p["name"], p.get("description", ""))
-                for i, p in enumerate(self._ts_results)
+                (p["name"], p.get("description", ""), p.get("_raw_pkg"))
+                for p in self._ts_results
                 if p.get("_raw_pkg") is not None and "zh_name" not in p["_raw_pkg"]
             ]
             if untranslated:
                 self._set_trans_list_btn("翻译中…", None)
                 threading.Thread(
                     target=self._translate_list_worker,
-                    args=(untranslated,),
+                    args=(untranslated, gen),
                     daemon=True,
                 ).start()
         else:
@@ -940,15 +940,21 @@ class App(tk.Tk):
     def _translate_list(self):
         if not self._ts_results:
             return
+        self._render_gen += 1
+        gen = self._render_gen
         self._set_trans_list_btn("翻译中…", None)
         self._set_status("正在翻译当前页，请稍候…")
-        items = [(i, p["name"], p.get("description", "")) for i, p in enumerate(self._ts_results)]
-        threading.Thread(target=self._translate_list_worker, args=(items,), daemon=True).start()
+        # 同时捕获 raw_pkg 引用，不依赖回调时的 _ts_results 索引
+        items = [
+            (p["name"], p.get("description", ""), p.get("_raw_pkg"))
+            for p in self._ts_results
+        ]
+        threading.Thread(target=self._translate_list_worker, args=(items, gen), daemon=True).start()
 
-    def _translate_list_worker(self, items: list):
-        indices = [i for i, _, _ in items]
-        names   = [n for _, n, _ in items]
-        descs   = [d for _, _, d in items]
+    def _translate_list_worker(self, items: list, gen: int):
+        names    = [n for n, _, _ in items]
+        descs    = [d for _, d, _ in items]
+        raw_pkgs = [r for _, _, r in items]
         try:
             zh_names = translate_batch(names)
         except Exception:
@@ -957,20 +963,19 @@ class App(tk.Tk):
             zh_descs = translate_batch(descs)
         except Exception:
             zh_descs = descs
-        results = list(zip(indices, zh_names, zh_descs))
-        self.after(0, lambda: self._apply_list_translation(results))
+        results = list(zip(zh_names, zh_descs, raw_pkgs))
+        self.after(0, lambda: self._apply_list_translation(results, gen))
 
-    def _apply_list_translation(self, results: list):
-        # 回写翻译结果到 _ts_all 原始对象
-        for idx, zh_name, zh_desc in results:
-            if idx >= len(self._ts_results):
-                continue
-            raw_pkg = self._ts_results[idx].get("_raw_pkg")
+    def _apply_list_translation(self, results: list, gen: int):
+        # 无论是否过期，都将翻译结果写入 _ts_all 缓存（raw_pkg 引用已在启动时捕获）
+        for zh_name, zh_desc, raw_pkg in results:
             if raw_pkg is not None:
                 raw_pkg["zh_name"] = zh_name
                 raw_pkg["zh_desc"] = zh_desc
+        # 代次不匹配说明已翻页，只写缓存不重新渲染
+        if gen != self._render_gen:
+            return
         self._ts_translated = True
-        # 重新渲染当前页（会直接使用已缓存的译文）
         self._ts_render_page()
         self._set_status("翻译完成")
 
