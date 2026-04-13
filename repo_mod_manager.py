@@ -34,8 +34,10 @@ def load_config() -> dict:
 
 def save_config(data: dict):
     try:
+        cfg = load_config()
+        cfg.update(data)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
@@ -535,6 +537,7 @@ class App(tk.Tk):
 
         cfg = load_config()
         self.plugins_dir = tk.StringVar(value=cfg.get("plugins_dir", "正在扫描…"))
+        self.game_dir    = tk.StringVar(value=cfg.get("game_dir", ""))
         self.status_var   = tk.StringVar(value="就绪")
         self._mods        = []
 
@@ -548,10 +551,22 @@ class App(tk.Tk):
 
     # ── UI 总装 ───────────────────────────────────────
     def _build_ui(self):
-        # 顶部路径栏（共享）
-        top = tk.Frame(self, bg=BG, pady=6)
+        # 第一行：游戏根目录
+        row1 = tk.Frame(self, bg=BG, pady=3)
+        row1.pack(fill=tk.X, padx=12)
+        tk.Label(row1, text="游戏目录:", bg=BG, fg=DIM, font=("Segoe UI", 9), width=9, anchor=tk.E).pack(side=tk.LEFT)
+        tk.Entry(
+            row1, textvariable=self.game_dir,
+            bg=PANEL, fg=FG, insertbackground=FG,
+            relief=tk.FLAT, font=("Segoe UI", 9), bd=4,
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
+        make_btn(row1, "浏览…", self._browse_game_dir, ACCENT).pack(side=tk.LEFT, padx=(0, 6))
+        make_btn(row1, "⬇ 安装 BepInEx", self._install_bepinex, GREEN).pack(side=tk.LEFT)
+
+        # 第二行：plugins 目录
+        top = tk.Frame(self, bg=BG, pady=3)
         top.pack(fill=tk.X, padx=12)
-        tk.Label(top, text="plugins 目录:", bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        tk.Label(top, text="plugins 目录:", bg=BG, fg=DIM, font=("Segoe UI", 9), width=9, anchor=tk.E).pack(side=tk.LEFT)
         tk.Entry(
             top, textvariable=self.plugins_dir,
             bg=PANEL, fg=FG, insertbackground=FG,
@@ -684,11 +699,73 @@ class App(tk.Tk):
         if found:
             self.plugins_dir.set(found)
             save_config({"plugins_dir": found})
+            # 自动推断游戏根目录：plugins → BepInEx → 游戏根
+            game_root = os.path.dirname(os.path.dirname(found))
+            if os.path.isdir(game_root) and not self.game_dir.get().strip():
+                self.game_dir.set(game_root)
+                save_config({"game_dir": game_root})
             self._set_status(f"已自动定位: {found}")
         else:
             self.plugins_dir.set("")
             self._set_status("未自动找到 plugins 目录，请手动浏览选择。")
         self._refresh_local()
+
+    def _browse_game_dir(self):
+        d = filedialog.askdirectory(title="选择游戏根目录（含 .exe 的那一层）")
+        if d:
+            path = d.replace("/", "\\")
+            self.game_dir.set(path)
+            save_config({"game_dir": path})
+
+    def _install_bepinex(self):
+        game_dir = self.game_dir.get().strip()
+        if not game_dir or not os.path.isdir(game_dir):
+            messagebox.showwarning("警告", "请先设置有效的游戏目录。")
+            return
+        if not messagebox.askyesno("确认安装",
+                "将从 Thunderstore 下载 BepInExPack 并安装到游戏目录。\n确定继续？"):
+            return
+        self._set_status("正在下载 BepInExPack…")
+        threading.Thread(target=self._bepinex_install_worker,
+                         args=(game_dir,), daemon=True).start()
+
+    def _bepinex_install_worker(self, game_dir: str):
+        BEPINEX_URL = "https://thunderstore.io/c/repo/api/v1/package/BepInEx/BepInExPack/"
+        try:
+            req = urllib.request.Request(BEPINEX_URL,
+                                         headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+            with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+                pkg = json.loads(resp.read().decode())
+            dl_url = (pkg.get("versions") or [{}])[0].get("download_url", "")
+            if not dl_url:
+                raise ValueError("未找到下载链接")
+            data = ts_download(dl_url)
+            # BepInExPack ZIP 结构：BepInExPack_REPO_<ver>/BepInExPack_REPO/...
+            # 解压到游戏目录
+            buf = io.BytesIO(data)
+            with zipfile.ZipFile(buf, "r") as zf:
+                names = zf.namelist()
+                # 找到 BepInEx/ 内容的层级前缀
+                prefix = ""
+                for n in names:
+                    if "bepinex/" in n.lower() and not prefix:
+                        idx = n.lower().index("bepinex/")
+                        prefix = n[:idx]
+                        break
+                for member in names:
+                    if prefix and not member.startswith(prefix):
+                        continue
+                    rel = member[len(prefix):] if prefix else member
+                    if not rel or rel.endswith("/"):
+                        continue
+                    dest = os.path.join(game_dir, rel)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with zf.open(member) as src, open(dest, "wb") as dst:
+                        dst.write(src.read())
+            self.after(0, lambda: self._set_status("✅ BepInEx 安装完成！请先运行一次游戏再关闭，然后即可安装 MOD。"))
+        except Exception as exc:
+            self.after(0, lambda e=str(exc): messagebox.showerror("安装失败", f"BepInEx 安装失败：{e}"))
+            self.after(0, lambda: self._set_status("BepInEx 安装失败。"))
 
     def _browse_dir(self):
         d = filedialog.askdirectory(title="选择 BepInEx/plugins 目录")
