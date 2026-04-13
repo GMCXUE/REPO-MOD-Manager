@@ -581,9 +581,30 @@ class App(tk.Tk):
 
     # ── UI 总装 ───────────────────────────────────────
     def _build_ui(self):
+        # 顶部区：左侧两行路径 + 右侧大号启动按钮
+        header = tk.Frame(self, bg=BG, pady=4)
+        header.pack(fill=tk.X, padx=12)
+
+        # 右侧：启动游戏大按钮（跨两行）
+        launch_btn = tk.Label(
+            header, text="🎮\n启动游戏",
+            bg=GREEN, fg="#ffffff",
+            font=("Segoe UI", 11, "bold"),
+            padx=14, pady=8, cursor="hand2",
+            justify=tk.CENTER,
+        )
+        launch_btn.pack(side=tk.RIGHT, padx=(10, 0))
+        launch_btn.bind("<Button-1>", lambda e: self._launch_game())
+        launch_btn.bind("<Enter>",    lambda e: launch_btn.config(bg=_darken(GREEN)))
+        launch_btn.bind("<Leave>",    lambda e: launch_btn.config(bg=GREEN))
+
+        # 左侧：两行路径
+        rows = tk.Frame(header, bg=BG)
+        rows.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         # 第一行：游戏根目录
-        row1 = tk.Frame(self, bg=BG, pady=3)
-        row1.pack(fill=tk.X, padx=12)
+        row1 = tk.Frame(rows, bg=BG, pady=2)
+        row1.pack(fill=tk.X)
         tk.Label(row1, text="游戏目录:", bg=BG, fg=DIM, font=("Segoe UI", 9), width=9, anchor=tk.E).pack(side=tk.LEFT)
         tk.Entry(
             row1, textvariable=self.game_dir,
@@ -594,15 +615,15 @@ class App(tk.Tk):
         make_btn(row1, "⬇ 安装 BepInEx", self._install_bepinex, GREEN).pack(side=tk.LEFT)
 
         # 第二行：plugins 目录
-        top = tk.Frame(self, bg=BG, pady=3)
-        top.pack(fill=tk.X, padx=12)
-        tk.Label(top, text="plugins 目录:", bg=BG, fg=DIM, font=("Segoe UI", 9), width=9, anchor=tk.E).pack(side=tk.LEFT)
+        row2 = tk.Frame(rows, bg=BG, pady=2)
+        row2.pack(fill=tk.X)
+        tk.Label(row2, text="plugins 目录:", bg=BG, fg=DIM, font=("Segoe UI", 9), width=9, anchor=tk.E).pack(side=tk.LEFT)
         tk.Entry(
-            top, textvariable=self.plugins_dir,
+            row2, textvariable=self.plugins_dir,
             bg=PANEL, fg=FG, insertbackground=FG,
             relief=tk.FLAT, font=("Segoe UI", 9), bd=4,
         ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
-        make_btn(top, "浏览…", self._browse_dir, ACCENT).pack(side=tk.LEFT)
+        make_btn(row2, "浏览…", self._browse_dir, ACCENT).pack(side=tk.LEFT)
 
         # Notebook
         style = ttk.Style(self)
@@ -640,8 +661,7 @@ class App(tk.Tk):
         btn_bar = tk.Frame(parent, bg=BG, pady=4)
         btn_bar.pack(fill=tk.X)
         make_btn(btn_bar, "📦 导入 ZIP 安装", self._install_local_zip, GREEN).pack(side=tk.LEFT, padx=(0, 8))
-        make_btn(btn_bar, "🔄 刷新列表",      self._refresh_local,     ACCENT).pack(side=tk.LEFT, padx=(0, 8))
-        make_btn(btn_bar, "🎮 启动游戏",      self._launch_game,       BTN_LIGHT).pack(side=tk.LEFT)
+        make_btn(btn_bar, "🔄 刷新列表",      self._refresh_local,     ACCENT).pack(side=tk.LEFT)
 
         # 卡片滚动区
         grid_outer = tk.Frame(parent, bg=BG)
