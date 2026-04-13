@@ -521,7 +521,7 @@ class App(tk.Tk):
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("Treeview", background=PANEL, foreground=FG,
-                        fieldbackground=PANEL, rowheight=26, font=("Segoe UI", 10))
+                        fieldbackground=PANEL, rowheight=48, font=("Segoe UI", 10))
         style.configure("Treeview.Heading", background=ACCENT,
                         foreground="#ffffff", font=("Segoe UI", 9, "bold"))
         style.map("Treeview", background=[("selected", ACCENT)])
@@ -564,9 +564,10 @@ class App(tk.Tk):
         self.local_tree.heading("name", text="MOD 名称")
         self.local_tree.heading("kind", text="类型")
         self.local_tree.heading("path", text="路径")
-        self.local_tree.column("name", width=220, minwidth=120)
+        self.local_tree.column("name", width=240, minwidth=120)
         self.local_tree.column("kind", width=70,  minwidth=60, anchor=tk.CENTER)
         self.local_tree.column("path", width=500, minwidth=200)
+        self._local_img_refs: dict = {}  # iid -> PhotoImage
 
         vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.local_tree.yview)
         self.local_tree.configure(yscrollcommand=vsb.set)
@@ -662,17 +663,30 @@ class App(tk.Tk):
 
     def _refresh_local(self):
         self.local_tree.delete(*self.local_tree.get_children())
+        self._local_img_refs.clear()
         d = self.plugins_dir.get().strip()
         if not d or not os.path.isdir(d):
             self._set_status("plugins 目录无效，请重新选择。")
             return
         self._mods = list_mods(d)
-        # 更新已安装名称集合（去掉 .dll 后缀，转小写）
         self._installed_names = {
             os.path.splitext(m["name"])[0].lower() for m in self._mods
         }
         for mod in self._mods:
-            self.local_tree.insert("", tk.END, values=(mod["name"], mod["kind"], mod["path"]))
+            iid = self.local_tree.insert("", tk.END, values=(mod["name"], mod["kind"], mod["path"]))
+            # 异步加载图标
+            mod_name_lc = os.path.splitext(mod["name"])[0].lower()
+            icon_url = next(
+                (((p.get("versions") or [{}])[0].get("icon", ""))
+                 for p in _ts_all if p.get("name", "").lower() == mod_name_lc),
+                ""
+            )
+            if icon_url:
+                threading.Thread(
+                    target=self._load_local_icon_worker,
+                    args=(iid, icon_url),
+                    daemon=True,
+                ).start()
         self._set_status(f"共找到 {len(self._mods)} 个 MOD。")
 
     def _install_local_zip(self):
@@ -964,6 +978,31 @@ class App(tk.Tk):
             frame.config(bg=PANEL)
         except Exception:
             pass
+
+    def _load_local_icon_worker(self, iid: str, url: str):
+        ICON_SIZE = 40
+        if url not in _icon_cache:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "REPO-MOD-Manager/1.0"})
+                with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
+                    raw = resp.read()
+                import base64
+                b64 = base64.b64encode(raw).decode()
+                img = tk.PhotoImage(data=b64)
+                iw, ih = img.width(), img.height()
+                scale = max(1, max(iw, ih) // ICON_SIZE)
+                img = img.subsample(scale, scale)
+                _icon_cache[url] = img
+            except Exception:
+                return
+        img = _icon_cache[url]
+        def _apply():
+            try:
+                self._local_img_refs[iid] = img
+                self.local_tree.item(iid, image=img)
+            except Exception:
+                pass
+        self.after(0, _apply)
 
     def _set_trans_list_btn(self, text: str, cmd):
         self._trans_list_btn.config(text=text)
