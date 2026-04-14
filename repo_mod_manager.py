@@ -534,79 +534,155 @@ class ModDetailDialog(tk.Toplevel):
             threading.Thread(target=self._load_icon, args=(pkg["icon"],), daemon=True).start()
 
     def _build(self, pkg: dict):
-        # 顶部：图标 + 基本信息
-        top = tk.Frame(self, bg=BG, pady=12, padx=16)
-        top.pack(fill=tk.X)
+        import webbrowser
 
-        # 图标占位
-        self._icon_label = tk.Label(
-            top, bg=PANEL, width=self.ICON_SIZE, height=self.ICON_SIZE,
-            text="加载中…", fg=DIM, font=("Segoe UI", 8),
-            relief=tk.FLAT,
-        )
-        self._icon_label.pack(side=tk.LEFT, padx=(0, 16))
-        self._icon_label.config(width=self.ICON_SIZE, height=self.ICON_SIZE)
-
-        # 右侧文字信息
-        info = tk.Frame(top, bg=BG)
-        info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        tk.Label(info, text=pkg["name"], bg=BG, fg=FG,
-                 font=("Segoe UI", 14, "bold"), anchor=tk.W).pack(fill=tk.X)
-        tk.Label(info, text=f"作者：{pkg['author']}    版本：{pkg['version']}",
-                 bg=BG, fg=DIM, font=("Segoe UI", 9), anchor=tk.W).pack(fill=tk.X, pady=(2, 0))
-        tk.Label(info, text=f"下载量：{pkg['downloads']}    评分：{pkg['rating_score']}",
-                 bg=BG, fg=DIM, font=("Segoe UI", 9), anchor=tk.W).pack(fill=tk.X)
-        if pkg.get("website_url"):
-            tk.Label(info, text=f"主页：{pkg['website_url']}",
-                     bg=BG, fg=ACCENT, font=("Segoe UI", 9), anchor=tk.W,
-                     cursor="hand2").pack(fill=tk.X, pady=(2, 0))
-
-        # 分隔线
-        tk.Frame(self, bg=BAR, height=1).pack(fill=tk.X, padx=16)
-
-        # 描述
-        desc_frame = tk.Frame(self, bg=BG, padx=16, pady=8)
-        desc_frame.pack(fill=tk.BOTH, expand=True)
-
-        desc_header = tk.Frame(desc_frame, bg=BG)
-        desc_header.pack(fill=tk.X)
-        tk.Label(desc_header, text="简介", bg=BG, fg=ACCENT,
-                 font=("Segoe UI", 9, "bold"), anchor=tk.W).pack(side=tk.LEFT)
-        self._trans_btn = make_label_btn(
-            desc_header, "🌐 翻译为中文", self._do_translate, BTN_LIGHT, font_size=8,
-        )
-        self._trans_btn.pack(side=tk.LEFT, padx=(8, 0))
-        self._orig_desc = pkg.get("description", "")
-
-        self._desc_text = tk.Text(
-            desc_frame, bg=PANEL, fg=FG, font=("Segoe UI", 9),
-            relief=tk.FLAT, wrap=tk.WORD, height=6, bd=4,
-            state=tk.NORMAL,
-        )
-        self._desc_text.insert(tk.END, self._orig_desc or "（无简介）")
-        self._desc_text.config(state=tk.DISABLED)
-        self._desc_text.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
-
-        # 依赖
-        deps = pkg.get("dependencies", [])
-        if deps:
-            tk.Label(desc_frame, text=f"依赖（{len(deps)} 个）", bg=BG, fg=ACCENT,
-                     font=("Segoe UI", 9, "bold"), anchor=tk.W).pack(fill=tk.X, pady=(8, 0))
-            dep_box = tk.Text(
-                desc_frame, bg=PANEL, fg=DIM, font=("Segoe UI", 8),
-                relief=tk.FLAT, wrap=tk.WORD, height=3, bd=4,
-                state=tk.NORMAL,
-            )
-            dep_box.insert(tk.END, "\n".join(deps))
-            dep_box.config(state=tk.DISABLED)
-            dep_box.pack(fill=tk.X, pady=(2, 0))
-
-        # 底部按钮
+        # ── 底部按钮（先 pack，side=BOTTOM）──────────────
         btn_bar = tk.Frame(self, bg=BAR, pady=8, padx=16)
         btn_bar.pack(fill=tk.X, side=tk.BOTTOM)
         make_btn(btn_bar, "⬇ 下载并安装", self._on_install, GREEN).pack(side=tk.LEFT)
         make_btn(btn_bar, "关闭", self.destroy, BTN_LIGHT).pack(side=tk.RIGHT)
+        if pkg.get("website_url"):
+            url = pkg["website_url"]
+            make_label_btn(btn_bar, "🔗 主页", lambda u=url: webbrowser.open(u),
+                           BTN_LIGHT, font_size=9).pack(side=tk.LEFT, padx=(8, 0))
+        ts_url = f"https://thunderstore.io/c/repo/p/{pkg.get('author','')}/{pkg.get('name','')}/"
+        make_label_btn(btn_bar, "🌩 Thunderstore",
+                       lambda u=ts_url: webbrowser.open(u),
+                       BTN_LIGHT, font_size=9).pack(side=tk.LEFT, padx=(8, 0))
+
+        # ── 主体可滚动区 ──────────────────────────────────
+        body_outer = tk.Frame(self, bg=BG)
+        body_outer.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(body_outer, bg=BG, highlightthickness=0)
+        vsb = ttk.Scrollbar(body_outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        body = tk.Frame(canvas, bg=BG)
+        win_id = canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            canvas.bind(seq, lambda e: canvas.yview_scroll(
+                -1 if (e.delta > 0 if e.num == "??" else e.num == 4) else 1, "units"))
+
+        # ── 顶部：图标 + 基本信息 ─────────────────────────
+        top = tk.Frame(body, bg=BG, pady=12, padx=16)
+        top.pack(fill=tk.X)
+
+        self._icon_label = tk.Label(
+            top, bg=PANEL, width=self.ICON_SIZE, height=self.ICON_SIZE,
+            text="…", fg=DIM, font=("Segoe UI", 8), relief=tk.FLAT,
+        )
+        self._icon_label.pack(side=tk.LEFT, padx=(0, 16))
+
+        info = tk.Frame(top, bg=BG)
+        info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # 名称
+        tk.Label(info, text=pkg.get("name", ""), bg=BG, fg=FG,
+                 font=("Segoe UI", 15, "bold"), anchor=tk.W).pack(fill=tk.X)
+        # 作者
+        tk.Label(info, text=f"作者：{pkg.get('author', '')}",
+                 bg=BG, fg=ACCENT, font=("Segoe UI", 9), anchor=tk.W).pack(fill=tk.X, pady=(2, 0))
+        # 版本
+        tk.Label(info, text=f"版本：{pkg.get('version', '')}",
+                 bg=BG, fg=DIM, font=("Segoe UI", 9), anchor=tk.W).pack(fill=tk.X)
+        # 下载量 + 评分
+        tk.Label(info,
+                 text=f"⬇ 下载量：{pkg.get('downloads', 0):,}    👍 评分：{pkg.get('rating_score', 0)}",
+                 bg=BG, fg=DIM, font=("Segoe UI", 9), anchor=tk.W).pack(fill=tk.X)
+
+        # 分类标签
+        cats = pkg.get("categories", [])
+        if cats:
+            cat_row = tk.Frame(info, bg=BG)
+            cat_row.pack(fill=tk.X, pady=(4, 0))
+            for cat in cats:
+                tk.Label(cat_row, text=cat, bg=BAR, fg=DIM,
+                         font=("Segoe UI", 8), padx=6, pady=2).pack(side=tk.LEFT, padx=(0, 4))
+
+        # 主页链接（可点击）
+        if pkg.get("website_url"):
+            url = pkg["website_url"]
+            lbl = tk.Label(info, text=f"🔗 {url}", bg=BG, fg=ACCENT,
+                           font=("Segoe UI", 8), anchor=tk.W, cursor="hand2")
+            lbl.pack(fill=tk.X, pady=(4, 0))
+            lbl.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+
+        # 分隔线
+        tk.Frame(body, bg=BAR, height=1).pack(fill=tk.X, padx=16, pady=(0, 4))
+
+        # ── 简介 ─────────────────────────────────────────
+        desc_frame = tk.Frame(body, bg=BG, padx=16, pady=4)
+        desc_frame.pack(fill=tk.X)
+
+        desc_header = tk.Frame(desc_frame, bg=BG)
+        desc_header.pack(fill=tk.X)
+        tk.Label(desc_header, text="📄 简介", bg=BG, fg=ACCENT,
+                 font=("Segoe UI", 9, "bold"), anchor=tk.W).pack(side=tk.LEFT)
+        self._trans_btn = make_label_btn(
+            desc_header, "🌐 翻译为中文", self._do_translate, BTN_LIGHT, font_size=8)
+        self._trans_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+        self._orig_desc = pkg.get("description", "")
+        self._desc_text = tk.Text(
+            desc_frame, bg=PANEL, fg=FG, font=("Segoe UI", 9),
+            relief=tk.FLAT, wrap=tk.WORD, height=6, bd=4, state=tk.NORMAL,
+        )
+        self._desc_text.insert(tk.END, self._orig_desc or "（无简介）")
+        self._desc_text.config(state=tk.DISABLED)
+        self._desc_text.pack(fill=tk.X, pady=(4, 0))
+
+        # ── 版本历史 ──────────────────────────────────────
+        raw_pkg = pkg.get("_raw_pkg") or {}
+        versions = raw_pkg.get("versions") or []
+        if len(versions) > 1:
+            tk.Frame(body, bg=BAR, height=1).pack(fill=tk.X, padx=16, pady=(8, 4))
+            ver_frame = tk.Frame(body, bg=BG, padx=16, pady=4)
+            ver_frame.pack(fill=tk.X)
+            tk.Label(ver_frame, text=f"🕓 版本历史（共 {len(versions)} 个版本）",
+                     bg=BG, fg=ACCENT, font=("Segoe UI", 9, "bold"), anchor=tk.W).pack(fill=tk.X)
+            ver_text = tk.Text(
+                ver_frame, bg=PANEL, fg=DIM, font=("Segoe UI", 8),
+                relief=tk.FLAT, wrap=tk.NONE, height=min(5, len(versions)), bd=4, state=tk.NORMAL,
+            )
+            for v in versions:
+                vnum = v.get("version_number", "")
+                vdl  = v.get("downloads", 0)
+                vdate = v.get("date_created", "")[:10]
+                ver_text.insert(tk.END, f"  {vnum}  ⬇{vdl:,}  {vdate}\n")
+            ver_text.config(state=tk.DISABLED)
+            ver_text.pack(fill=tk.X, pady=(4, 0))
+
+        # ── 依赖 ──────────────────────────────────────────
+        deps = pkg.get("dependencies", [])
+        if deps:
+            tk.Frame(body, bg=BAR, height=1).pack(fill=tk.X, padx=16, pady=(8, 4))
+            dep_frame = tk.Frame(body, bg=BG, padx=16, pady=4)
+            dep_frame.pack(fill=tk.X)
+            tk.Label(dep_frame, text=f"🔗 依赖（{len(deps)} 个）",
+                     bg=BG, fg=ACCENT, font=("Segoe UI", 9, "bold"), anchor=tk.W).pack(fill=tk.X)
+            dep_box = tk.Text(
+                dep_frame, bg=PANEL, fg=DIM, font=("Segoe UI", 8),
+                relief=tk.FLAT, wrap=tk.WORD, height=min(4, len(deps)), bd=4, state=tk.NORMAL,
+            )
+            dep_box.insert(tk.END, "\n".join(f"  • {d}" for d in deps))
+            dep_box.config(state=tk.DISABLED)
+            dep_box.pack(fill=tk.X, pady=(4, 0))
+
+        # ── 下载链接 ──────────────────────────────────────
+        dl_url = pkg.get("download_url", "")
+        if dl_url:
+            tk.Frame(body, bg=BAR, height=1).pack(fill=tk.X, padx=16, pady=(8, 4))
+            dl_frame = tk.Frame(body, bg=BG, padx=16, pady=4)
+            dl_frame.pack(fill=tk.X)
+            tk.Label(dl_frame, text="📦 下载链接", bg=BG, fg=ACCENT,
+                     font=("Segoe UI", 9, "bold"), anchor=tk.W).pack(fill=tk.X)
+            lbl = tk.Label(dl_frame, text=dl_url, bg=BG, fg=ACCENT,
+                           font=("Segoe UI", 8), anchor=tk.W, cursor="hand2", wraplength=480)
+            lbl.pack(fill=tk.X, pady=(2, 0))
+            lbl.bind("<Button-1>", lambda e, u=dl_url: webbrowser.open(u))
 
         # 弹窗显示后自动翻译简介
         self.after(100, self._do_translate)
