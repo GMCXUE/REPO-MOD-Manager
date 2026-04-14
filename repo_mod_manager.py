@@ -637,23 +637,48 @@ class ModDetailDialog(tk.Toplevel):
         # ── 版本历史 ──────────────────────────────────────
         raw_pkg = pkg.get("_raw_pkg") or {}
         versions = raw_pkg.get("versions") or []
-        if len(versions) > 1:
+        if versions:
             tk.Frame(body, bg=BAR, height=1).pack(fill=tk.X, padx=16, pady=(8, 4))
             ver_frame = tk.Frame(body, bg=BG, padx=16, pady=4)
             ver_frame.pack(fill=tk.X)
             tk.Label(ver_frame, text=f"🕓 版本历史（共 {len(versions)} 个版本）",
                      bg=BG, fg=ACCENT, font=("Segoe UI", 9, "bold"), anchor=tk.W).pack(fill=tk.X)
-            ver_text = tk.Text(
-                ver_frame, bg=PANEL, fg=DIM, font=("Segoe UI", 8),
-                relief=tk.FLAT, wrap=tk.NONE, height=min(5, len(versions)), bd=4, state=tk.NORMAL,
-            )
+            ver_list = tk.Frame(ver_frame, bg=PANEL, padx=4, pady=4)
+            ver_list.pack(fill=tk.X, pady=(4, 0))
             for v in versions:
-                vnum = v.get("version_number", "")
-                vdl  = v.get("downloads", 0)
+                vnum  = v.get("version_number", "")
+                vdl   = v.get("downloads", 0)
                 vdate = v.get("date_created", "")[:10]
-                ver_text.insert(tk.END, f"  {vnum}  ⬇{vdl:,}  {vdate}\n")
-            ver_text.config(state=tk.DISABLED)
-            ver_text.pack(fill=tk.X, pady=(4, 0))
+                vurl  = v.get("download_url", "")
+                is_latest = (v is versions[0])
+
+                row = tk.Frame(ver_list, bg=PANEL, pady=3)
+                row.pack(fill=tk.X)
+
+                badge_text = "最新" if is_latest else ""
+                if badge_text:
+                    tk.Label(row, text=badge_text, bg=GREEN, fg="#fff",
+                             font=("Segoe UI", 7, "bold"), padx=4, pady=1).pack(side=tk.LEFT, padx=(0, 6))
+
+                tk.Label(row, text=vnum, bg=PANEL, fg=FG,
+                         font=("Segoe UI", 9, "bold"), width=10, anchor=tk.W).pack(side=tk.LEFT)
+                tk.Label(row, text=vdate, bg=PANEL, fg=DIM,
+                         font=("Segoe UI", 8), width=12, anchor=tk.W).pack(side=tk.LEFT)
+                tk.Label(row, text=f"⬇ {vdl:,}", bg=PANEL, fg=DIM,
+                         font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(0, 8))
+
+                if vurl:
+                    lbl = tk.Label(row, text="🔗 下载链接", bg=PANEL, fg=ACCENT,
+                                   font=("Segoe UI", 8), cursor="hand2")
+                    lbl.pack(side=tk.LEFT, padx=(0, 6))
+                    lbl.bind("<Button-1>", lambda e, u=vurl: webbrowser.open(u))
+
+                    make_label_btn(row, "⬇ 安装此版本",
+                                   lambda u=vurl: self._install_version(u),
+                                   BTN_LIGHT, font_size=8).pack(side=tk.LEFT)
+
+                if v is not versions[-1]:
+                    tk.Frame(ver_list, bg=BAR, height=1).pack(fill=tk.X, padx=4)
 
         # ── 依赖 ──────────────────────────────────────────
         deps = pkg.get("dependencies", [])
@@ -690,6 +715,11 @@ class ModDetailDialog(tk.Toplevel):
     def _on_install(self):
         self.destroy()
         self._install_cb()
+
+    def _install_version(self, download_url: str):
+        """安装指定版本（直接用传入的 download_url）。"""
+        self.destroy()
+        self._install_cb(override_url=download_url)
 
     def _do_translate(self):
         self._trans_btn.config(text="翻译中…")
@@ -1248,7 +1278,7 @@ class App(tk.Tk):
             self._card_frame.grid_columnconfigure(col, weight=1)
 
     def _ts_show_detail(self, pkg):
-        ModDetailDialog(self, pkg, install_cb=lambda: self._ts_do_install(pkg))
+        ModDetailDialog(self, pkg, install_cb=lambda override_url=None: self._ts_do_install(pkg, override_url=override_url))
 
     def _ts_sort_changed(self):
         self._ts_page = 1
@@ -1599,31 +1629,38 @@ class App(tk.Tk):
             result.append(dep_pkg)
         return result
 
-    def _ts_do_install(self, pkg: dict):
+    def _ts_do_install(self, pkg: dict, override_url: str = None):
         d = self.plugins_dir.get().strip()
         if not d or not os.path.isdir(d):
             messagebox.showwarning("警告", "请先设置有效的 plugins 目录。")
             return
         name   = pkg["name"]
-        dl_url = pkg["download_url"]
+        dl_url = override_url or pkg.get("download_url", "")
         if not dl_url:
             messagebox.showerror("错误", "该 MOD 无可用下载链接。")
             return
-        # 收集缺失前置
-        missing_deps = self._collect_missing_deps(pkg, {name.lower()})
-        if missing_deps:
-            dep_names = "\n".join(f"  • {p['author']}-{p['name']}" for p in missing_deps)
-            msg = (
-                f"确定安装以下 MOD 吗？\n\n"
-                f"{pkg['author']}-{name}\n\n"
-                f"将同时安装以下 {len(missing_deps)} 个缺失前置：\n{dep_names}"
-            )
+        # 如果是指定历史版本，直接安装该版本（不拉取前置）
+        if override_url:
+            ver_label = override_url.split("/")[-2] if override_url else ""
+            msg = f"确定要安装指定版本吗？\n\n{pkg['author']}-{name} {ver_label}"
+            if not messagebox.askyesno("确认安装", msg):
+                return
+            install_queue = [{**pkg, "download_url": override_url}]
         else:
-            msg = f"确定要下载并安装以下 MOD 吗？\n\n{pkg['author']}-{name}"
-        if not messagebox.askyesno("确认安装", msg):
-            return
-        # 按顺序：先前置再主包
-        install_queue = missing_deps + [pkg]
+            # 收集缺失前置
+            missing_deps = self._collect_missing_deps(pkg, {name.lower()})
+            if missing_deps:
+                dep_names = "\n".join(f"  • {p['author']}-{p['name']}" for p in missing_deps)
+                msg = (
+                    f"确定安装以下 MOD 吗？\n\n"
+                    f"{pkg['author']}-{name}\n\n"
+                    f"将同时安装以下 {len(missing_deps)} 个缺失前置：\n{dep_names}"
+                )
+            else:
+                msg = f"确定要下载并安装以下 MOD 吗？\n\n{pkg['author']}-{name}"
+            if not messagebox.askyesno("确认安装", msg):
+                return
+            install_queue = missing_deps + [pkg]
         dlg = DownloadDialog(self, title=f"安装 {name}")
         self._set_status(f"正在下载 {name}…")
         threading.Thread(
