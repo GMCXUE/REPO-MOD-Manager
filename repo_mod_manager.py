@@ -167,16 +167,21 @@ def t(key: str, **kwargs) -> str:
     s = _STRINGS.get(key, {}).get(_LANG, _STRINGS.get(key, {}).get("zh", key))
     return s.format(**kwargs) if kwargs else s
 
-# ── 颜色主题 ──────────────────────────────────────────
-BG        = "#f0f4fa"
+# ── 颜色主题 ──────────────────────────────────────────────────────
+BG        = "#eef2f8"
 PANEL     = "#ffffff"
-ACCENT    = "#1a6ed8"
-GREEN     = "#1a8a4a"
-RED       = "#c0392b"
-FG        = "#1a2a3a"
-DIM       = "#5a7a9a"
-BAR       = "#dce8f5"
-BTN_LIGHT = "#5ba3e8"  # 淡蓝按钮色
+ACCENT    = "#2563eb"
+GREEN     = "#16a34a"
+RED       = "#dc2626"
+FG        = "#0f172a"
+DIM       = "#64748b"
+BAR       = "#cbd5e1"
+BTN_LIGHT = "#3b82f6"  # 淡蓝按钮色
+CARD_BDR  = "#e2e8f0"  # 卡片边框色
+HOVER_BG  = "#f1f5fd"  # 卡片悬停色
+TAG_BG    = "#dbeafe"  # 标签背景色
+TAG_FG    = "#1d4ed8"  # 标签文字色
+IMG_PH    = "#dde6f0"  # 图片占位背景色
 
 
 # ── 本地核心逻辑 ──────────────────────────────────────
@@ -873,7 +878,10 @@ class App(tk.Tk):
         ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
         make_btn(row2, t("browse"), self._browse_dir, ACCENT).pack(side=tk.LEFT)
 
-        # Notebook
+        # 顶部分隔线
+        tk.Frame(self, bg=BAR, height=1).pack(fill=tk.X)
+
+        # Notebook & ttk 样式
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("Treeview", background=PANEL, foreground=FG,
@@ -882,10 +890,15 @@ class App(tk.Tk):
                         foreground="#ffffff", font=("Segoe UI", 9, "bold"))
         style.map("Treeview", background=[("selected", ACCENT)])
         style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", background=PANEL, foreground=FG,
-                        padding=[12, 5], font=("Segoe UI", 9, "bold"))
-        style.map("TNotebook.Tab", background=[("selected", ACCENT)],
+        style.configure("TNotebook.Tab", background="#dde6f4", foreground=DIM,
+                        padding=[14, 6], font=("Segoe UI", 9, "bold"))
+        style.map("TNotebook.Tab",
+                  background=[("selected", ACCENT)],
                   foreground=[("selected", "#ffffff")])
+        style.configure("Vertical.TScrollbar", background=BAR,
+                        troughcolor=BG, borderwidth=0, arrowsize=13)
+        style.configure("TCombobox", fieldbackground=PANEL, background=PANEL,
+                        foreground=FG, selectbackground=ACCENT, selectforeground="#fff")
 
         nb = ttk.Notebook(self)
         nb.pack(fill=tk.BOTH, expand=True, padx=12, pady=(4, 0))
@@ -1137,30 +1150,36 @@ class App(tk.Tk):
             row, col = divmod(idx, COLS)
 
             card = tk.Frame(self._local_card_frame, bg=PANEL, bd=0,
-                            highlightthickness=1, highlightbackground="#d0dce8",
+                            highlightthickness=1, highlightbackground=CARD_BDR,
                             width=LOCAL_CARD_W, cursor="hand2")
-            card.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+            card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
             self._local_card_frame.grid_columnconfigure(col, weight=1)
 
+            def _lc_enter(e, c=card): c.config(highlightbackground=ACCENT)
+            def _lc_leave(e, c=card): c.config(highlightbackground=CARD_BDR)
+            card.bind("<Enter>", _lc_enter)
+            card.bind("<Leave>", _lc_leave)
+
             # 图片区
-            img_frame = tk.Frame(card, bg="#c8d8e8", height=LOCAL_IMG_H, width=LOCAL_CARD_W)
+            img_frame = tk.Frame(card, bg=IMG_PH, height=LOCAL_IMG_H, width=LOCAL_CARD_W)
             img_frame.pack(fill=tk.X)
             img_frame.pack_propagate(False)
-            img_lbl = tk.Label(img_frame, bg="#c8d8e8", text="", cursor="hand2")
+            img_lbl = tk.Label(img_frame, bg=IMG_PH, text="", cursor="hand2")
             img_lbl.place(relx=0, rely=0, relwidth=1, relheight=1)
 
             # 文字区
-            info = tk.Frame(card, bg=PANEL, padx=8, pady=6)
+            info = tk.Frame(card, bg=PANEL, padx=10, pady=8)
             info.pack(fill=tk.BOTH, expand=True)
             tk.Label(info, text=name, bg=PANEL, fg=FG,
                      font=("Segoe UI", 9, "bold"),
-                     anchor=tk.W, wraplength=LOCAL_CARD_W - 16, justify=tk.LEFT
+                     anchor=tk.W, wraplength=LOCAL_CARD_W - 20, justify=tk.LEFT
                      ).pack(fill=tk.X)
             tk.Label(info, text=kind, bg=PANEL, fg=DIM,
-                     font=("Segoe UI", 8), anchor=tk.W).pack(fill=tk.X)
+                     font=("Segoe UI", 8), anchor=tk.W).pack(fill=tk.X, pady=(1, 0))
+            tk.Frame(info, bg=CARD_BDR, height=1).pack(fill=tk.X, pady=(5, 4))
 
             btn_row = tk.Frame(info, bg=PANEL)
-            btn_row.pack(fill=tk.X, pady=(6, 2))
+            btn_row.pack(fill=tk.X)
             make_label_btn(btn_row, "🗑 删除",
                            lambda p=path, n=name: self._delete_mod_card(n, p),
                            RED).pack(side=tk.LEFT)
@@ -1394,64 +1413,87 @@ class App(tk.Tk):
             _pkg = self._ts_results[-1]
 
             card = tk.Frame(self._card_frame, bg=PANEL, bd=0,
-                            highlightthickness=1, highlightbackground="#d0dce8",
+                            highlightthickness=1, highlightbackground=CARD_BDR,
                             width=CARD_W, cursor="hand2")
-            card.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+            card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
             self._card_frame.grid_columnconfigure(col, weight=1)
 
+            # 悬停高亮
+            def _on_enter(e, c=card): c.config(highlightbackground=ACCENT)
+            def _on_leave(e, c=card): c.config(highlightbackground=CARD_BDR)
+            card.bind("<Enter>", _on_enter)
+            card.bind("<Leave>", _on_leave)
+
             # 图片区
-            img_frame = tk.Frame(card, bg="#c8d8e8", height=IMG_H, width=CARD_W)
+            img_frame = tk.Frame(card, bg=IMG_PH, height=IMG_H, width=CARD_W)
             img_frame.pack(fill=tk.X)
             img_frame.pack_propagate(False)
-            img_lbl = tk.Label(img_frame, bg="#c8d8e8", text="", cursor="hand2")
+            img_lbl = tk.Label(img_frame, bg=IMG_PH, text="", cursor="hand2")
             img_lbl.place(relx=0, rely=0, relwidth=1, relheight=1)
             # 已安装徽标
             if name.lower() in self._installed_names or \
                f"{author.lower()}-{name.lower()}" in self._installed_names:
-                tk.Label(img_frame, text="✓ 已安装",
+                tk.Label(img_frame, text=" ✓ 已安装 ",
                          bg=GREEN, fg="#ffffff",
-                         font=("Segoe UI", 8, "bold"), padx=6, pady=2,
-                         ).place(relx=1.0, rely=0.0, anchor="ne")
+                         font=("Segoe UI", 8, "bold"), pady=3,
+                         ).place(relx=0, rely=0, anchor="nw")
+
+            # 版本角标
+            if version:
+                tk.Label(img_frame, text=f" v{version} ",
+                         bg="#334155", fg="#ffffff",
+                         font=("Segoe UI", 7), pady=2,
+                         ).place(relx=1.0, rely=1.0, anchor="se")
 
             # 文字区
-            info = tk.Frame(card, bg=PANEL, padx=8, pady=6)
+            info = tk.Frame(card, bg=PANEL, padx=10, pady=8)
             info.pack(fill=tk.BOTH, expand=True)
-
-            meta_row = tk.Frame(info, bg=PANEL)
-            meta_row.pack(fill=tk.X)
-            tk.Label(meta_row, text=f"⬇ {dl_cnt:,}", bg=PANEL, fg=DIM,
-                     font=("Segoe UI", 8)).pack(side=tk.LEFT)
-            tk.Label(meta_row, text=f"  👍 {rating}", bg=PANEL, fg=DIM,
-                     font=("Segoe UI", 8)).pack(side=tk.LEFT)
 
             name_lbl = tk.Label(info, text=disp_name, bg=PANEL, fg=FG,
                                 font=("Segoe UI", 10, "bold"),
-                                anchor=tk.W, wraplength=CARD_W - 20, justify=tk.LEFT)
-            name_lbl.pack(fill=tk.X, pady=(2, 0))
+                                anchor=tk.W, wraplength=CARD_W - 22, justify=tk.LEFT)
+            name_lbl.pack(fill=tk.X)
 
-            tk.Label(info, text=f"By {author}", bg=PANEL, fg=ACCENT,
-                     font=("Segoe UI", 8), anchor=tk.W).pack(fill=tk.X)
+            author_lbl = tk.Label(info, text=f"by {author}", bg=PANEL, fg=ACCENT,
+                     font=("Segoe UI", 8), anchor=tk.W)
+            author_lbl.pack(fill=tk.X, pady=(1, 0))
 
-            desc_lbl = tk.Label(info, text=disp_desc[:120], bg=PANEL, fg=DIM,
+            tk.Frame(info, bg=CARD_BDR, height=1).pack(fill=tk.X, pady=(5, 4))
+
+            desc_lbl = tk.Label(info, text=disp_desc[:100] + ("…" if len(disp_desc) > 100 else ""),
+                                bg=PANEL, fg=DIM,
                                 font=("Segoe UI", 8), anchor=tk.W,
-                                wraplength=CARD_W - 20, justify=tk.LEFT)
-            desc_lbl.pack(fill=tk.X, pady=(4, 0))
+                                wraplength=CARD_W - 22, justify=tk.LEFT)
+            desc_lbl.pack(fill=tk.X)
 
             if cats:
                 tag_row = tk.Frame(info, bg=PANEL)
-                tag_row.pack(fill=tk.X, pady=(4, 0))
+                tag_row.pack(fill=tk.X, pady=(5, 0))
                 for cat in cats[:3]:
-                    tk.Label(tag_row, text=cat, bg=BAR, fg=DIM,
-                             font=("Segoe UI", 7), padx=4, pady=1).pack(side=tk.LEFT, padx=(0, 3))
+                    tk.Label(tag_row, text=cat, bg=TAG_BG, fg=TAG_FG,
+                             font=("Segoe UI", 7, "bold"), padx=5, pady=2
+                             ).pack(side=tk.LEFT, padx=(0, 4))
+
+            meta_row = tk.Frame(info, bg=PANEL)
+            meta_row.pack(fill=tk.X, pady=(5, 0))
+            tk.Label(meta_row, text=f"⬇ {dl_cnt:,}", bg=PANEL, fg=DIM,
+                     font=("Segoe UI", 8)).pack(side=tk.LEFT)
+            tk.Label(meta_row, text=f"  ⭐ {rating}", bg=PANEL, fg=DIM,
+                     font=("Segoe UI", 8)).pack(side=tk.LEFT)
 
             btn_row = tk.Frame(info, bg=PANEL)
-            btn_row.pack(fill=tk.X, pady=(6, 2))
+            btn_row.pack(fill=tk.X, pady=(6, 0))
             make_label_btn(btn_row, "⬇ 安装",
                            lambda p=_pkg: self._ts_do_install(p),
-                           BTN_LIGHT).pack(side=tk.LEFT)
+                           GREEN).pack(side=tk.LEFT)
+            make_label_btn(btn_row, "详情 ›",
+                           lambda p=_pkg: self._ts_show_detail(p),
+                           BTN_LIGHT).pack(side=tk.LEFT, padx=(6, 0))
 
-            for w in (card, img_frame, img_lbl, info, name_lbl, desc_lbl, btn_row):
+            for w in (card, img_frame, img_lbl, info, name_lbl, author_lbl, desc_lbl):
                 w.bind("<Button-1>", lambda e, p=_pkg: self._ts_show_detail(p))
+                w.bind("<Enter>", _on_enter)
+                w.bind("<Leave>", _on_leave)
 
             self._bind_scroll(card)
 
