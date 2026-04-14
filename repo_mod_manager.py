@@ -324,6 +324,28 @@ def delete_mod(mod_path):
 _icon_cache: dict = {}  # url -> PhotoImage，避免重复下载
 
 
+def _scale_image_to_fill(raw: bytes, target_h: int) -> "tk.PhotoImage":
+    """将图片字节缩放到目标高度并返回 PhotoImage，优先用 PIL 精确缩放。"""
+    try:
+        from PIL import Image, ImageTk
+        import io
+        pil_img = Image.open(io.BytesIO(raw)).convert("RGBA")
+        w, h = pil_img.size
+        scale = target_h / h
+        new_w = max(1, int(w * scale))
+        pil_img = pil_img.resize((new_w, target_h), Image.LANCZOS)
+        return ImageTk.PhotoImage(pil_img)
+    except ImportError:
+        import base64
+        b64 = base64.b64encode(raw).decode()
+        img = tk.PhotoImage(data=b64)
+        iw, ih = img.width(), img.height()
+        if ih > 0:
+            scale = max(1, ih // target_h)
+            img = img.subsample(scale, scale)
+        return img
+
+
 _BATCH_SEP = " |||| "
 
 
@@ -1019,7 +1041,7 @@ class App(tk.Tk):
             img_frame.pack(fill=tk.X)
             img_frame.pack_propagate(False)
             img_lbl = tk.Label(img_frame, bg="#c8d8e8", text="", cursor="hand2")
-            img_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            img_lbl.place(relx=0, rely=0, relwidth=1, relheight=1)
 
             # 文字区
             info = tk.Frame(card, bg=PANEL, padx=8, pady=6)
@@ -1276,7 +1298,7 @@ class App(tk.Tk):
             img_frame.pack(fill=tk.X)
             img_frame.pack_propagate(False)
             img_lbl = tk.Label(img_frame, bg="#c8d8e8", text="", cursor="hand2")
-            img_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            img_lbl.place(relx=0, rely=0, relwidth=1, relheight=1)
             # 已安装徽标
             if name.lower() in self._installed_names or \
                f"{author.lower()}-{name.lower()}" in self._installed_names:
@@ -1342,22 +1364,19 @@ class App(tk.Tk):
         self._card_canvas.configure(scrollregion=self._card_canvas.bbox("all"))
 
     def _load_card_icon(self, lbl, frame, url, img_h):
-        import base64
+        import base64, io
         global _icon_cache
-        if url not in _icon_cache:
+        cache_key = (url, img_h)
+        if cache_key not in _icon_cache:
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "REPOKit/1.0"})
                 with urllib.request.urlopen(req, timeout=8, context=_SSL_CTX) as resp:
                     raw = resp.read()
-                b64 = base64.b64encode(raw).decode()
-                img = tk.PhotoImage(data=b64)
-                iw, ih = img.width(), img.height()
-                scale = max(1, max(iw, ih) // img_h)
-                img = img.subsample(scale, scale)
-                _icon_cache[url] = img
+                img = _scale_image_to_fill(raw, img_h)
+                _icon_cache[cache_key] = img
             except Exception:
                 return
-        img = _icon_cache[url]
+        img = _icon_cache[cache_key]
         self._card_img_refs.append(img)
         self.after(0, lambda: self._set_card_image(lbl, frame, img))
 
@@ -1369,8 +1388,8 @@ class App(tk.Tk):
             pass
 
     def _load_local_icon_card_worker(self, path: str, src: str, lbl, frame, img_h: int):
-        IMG_W = 200
-        if src not in _icon_cache:
+        cache_key = (src, img_h)
+        if cache_key not in _icon_cache:
             try:
                 if src.startswith("http"):
                     req = urllib.request.Request(src, headers={"User-Agent": "REPOKit/1.0"})
@@ -1379,16 +1398,11 @@ class App(tk.Tk):
                 else:
                     with open(src, "rb") as f:
                         raw = f.read()
-                import base64
-                b64 = base64.b64encode(raw).decode()
-                img = tk.PhotoImage(data=b64)
-                iw, ih = img.width(), img.height()
-                scale = max(1, max(iw // IMG_W, ih // img_h))
-                img = img.subsample(scale, scale)
-                _icon_cache[src] = img
+                img = _scale_image_to_fill(raw, img_h)
+                _icon_cache[cache_key] = img
             except Exception:
                 return
-        img = _icon_cache[src]
+        img = _icon_cache[cache_key]
         self._local_img_refs[path] = img
         self.after(0, lambda: self._set_card_image(lbl, frame, img))
 
